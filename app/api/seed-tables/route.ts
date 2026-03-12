@@ -4,8 +4,6 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export async function POST() {
   try {
-    console.log('🌱 Seeding tables...');
-
     const tables = [];
     
     // Create 20 tables

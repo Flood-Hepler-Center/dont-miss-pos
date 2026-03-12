@@ -41,7 +41,7 @@ function OrderSuccessContent() {
         {/* Receipt Header */}
         <div className="text-center mb-6">
           <div className="text-xl">════════</div>
-          <h1 className="text-2xl font-bold my-4">DON'T MISS THIS SATURDAY</h1>
+          <h1 className="text-2xl font-bold my-4">DON&apos;T MISS THIS SATURDAY</h1>
           <div className="text-xl">════════</div>
         </div>
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { orderService } from '@/lib/services/order.service';
 import type { Order, OrderItem } from '@/types';
@@ -26,9 +26,6 @@ export default function KDSPage() {
           ...doc.data(),
         })) as Order[];
         setPlacedOrders(orders);
-      },
-      (error) => {
-        console.error('KDS Error fetching placed orders:', error);
       }
     );
 
@@ -49,9 +46,6 @@ export default function KDSPage() {
           ...doc.data(),
         })) as Order[];
         setPreparingOrders(orders);
-      },
-      (error) => {
-        console.error('KDS Error fetching preparing orders:', error);
       }
     );
 
@@ -72,9 +66,6 @@ export default function KDSPage() {
           ...doc.data(),
         })) as Order[];
         setReadyOrders(orders);
-      },
-      (error) => {
-        console.error('KDS Error fetching ready orders:', error);
       }
     );
 
@@ -85,24 +76,20 @@ export default function KDSPage() {
     try {
       if (order.status === 'PLACED') {
         await orderService.updateStatus(order.id, 'PREPARING');
-        console.log('Order moved to PREPARING');
       } else if (order.status === 'PREPARING') {
         await orderService.updateStatus(order.id, 'READY');
-        console.log('Order moved to READY');
       } else if (order.status === 'READY') {
         await orderService.updateStatus(order.id, 'SERVED');
-        console.log('Order moved to SERVED');
       }
     } catch (error) {
       console.error('Error updating order status:', error);
-      console.error('UPDATE FAILED');
     }
   };
 
   const OrderCard = ({ order, onClick }: { order: Order; onClick: () => void }) => {
     const orderTime = order.createdAt instanceof Date
       ? order.createdAt
-      : new Date((order.createdAt as any).seconds * 1000);
+      : new Date((order.createdAt as Timestamp).seconds * 1000);
 
     const getCardStyle = () => {
       if (order.status === 'PLACED') {
@@ -141,7 +128,7 @@ export default function KDSPage() {
               </div>
               {item.modifiers && item.modifiers.length > 0 && (
                 <div className="ml-8 text-base mt-1 border-l-4 border-black pl-2">
-                  {item.modifiers.map((mod: any, modIdx: number) => (
+                  {item.modifiers.map((mod, modIdx: number) => (
                     <div key={modIdx} className="font-bold">→ {mod.optionName}</div>
                   ))}
                 </div>

@@ -81,7 +81,7 @@ export function CashPayment({ total, table, orders, billCalculation, onComplete,
         paymentData.id = paymentRef.id;
 
         // Build payment document without undefined fields
-        const paymentDoc: any = {
+        const paymentDoc: Record<string, unknown> = {
           receiptNumber: paymentData.receiptNumber,
           tableId: paymentData.tableId,
           orderIds: paymentData.orderIds,

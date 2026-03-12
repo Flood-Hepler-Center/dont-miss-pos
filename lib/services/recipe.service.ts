@@ -147,9 +147,6 @@ export const recipeService = {
       modifiers?: Array<{ recipeMultiplier?: number }>;
     }>
   ): Promise<void> {
-    console.log('🔵 Starting inventory deduction for order:', orderId);
-    console.log('🔵 Items to process:', items.length);
-    
     try {
       // STEP 1: Fetch all recipes BEFORE starting the transaction
       // This is critical - Firestore transactions require all reads to be done via transaction.get()
@@ -157,14 +154,17 @@ export const recipeService = {
       const recipeData: Array<{ item: typeof items[0]; recipe: Recipe; recipeMultiplier: number }> = [];
       
       for (const item of items) {
-        console.log(`🔍 Fetching recipe for: ${item.name} (menuItemId: ${item.menuItemId})`);
         const recipe = await this.getByMenuItemId(item.menuItemId);
         
         if (!recipe) {
-          console.log(`⚠️ No recipe found for ${item.name} - skipping inventory deduction`);
           continue;
         }
-        console.log(`✅ Found recipe for ${item.name} with ${recipe.ingredients.length} ingredients`);
+
+        // Validate recipe.yield to prevent NaN
+        if (!recipe.yield || recipe.yield <= 0) {
+          console.error(`❌ Invalid recipe yield for ${item.name}: ${recipe.yield}. Recipe must have yield > 0. Skipping inventory deduction.`);
+          continue;
+        }
 
         // Calculate recipe multiplier from modifiers
         let recipeMultiplier = 1.0;
@@ -172,10 +172,8 @@ export const recipeService = {
           const modifierWithMultiplier = item.modifiers.find(m => m.recipeMultiplier && m.recipeMultiplier > 0);
           if (modifierWithMultiplier && modifierWithMultiplier.recipeMultiplier) {
             recipeMultiplier = modifierWithMultiplier.recipeMultiplier;
-            console.log(`📊 Recipe multiplier: ${recipeMultiplier} (from modifier)`);
           }
         }
-        console.log(`📊 Using recipe multiplier: ${recipeMultiplier}`);
 
         recipeData.push({ item, recipe, recipeMultiplier });
       }
@@ -197,6 +195,14 @@ export const recipeService = {
 
             const inventoryItem = inventoryDoc.data() as InventoryItem;
             const deductQty = (ingredient.quantity * item.quantity * recipeMultiplier) / recipe.yield;
+            
+            // Safety check: Ensure deductQty is a valid number
+            if (!Number.isFinite(deductQty) || deductQty < 0) {
+              console.error(`❌ Invalid deduction quantity for ${ingredient.inventoryItemName}: ${deductQty}`);
+              console.error(`   ingredient.quantity: ${ingredient.quantity}, item.quantity: ${item.quantity}, recipeMultiplier: ${recipeMultiplier}, recipe.yield: ${recipe.yield}`);
+              throw new Error(`Invalid calculation for ${ingredient.inventoryItemName}. Please check recipe data.`);
+            }
+            
             const newStock = inventoryItem.currentStock - deductQty;
             
             console.log(`📦 ${ingredient.inventoryItemName}: ${inventoryItem.currentStock} - ${deductQty} = ${newStock}`);
@@ -230,7 +236,6 @@ export const recipeService = {
         }
 
         // Log all stock movements
-        console.log(`📝 Creating ${movements.length} stock movement records`);
         for (const movement of movements) {
           const movementRef = doc(collection(db, 'stockMovements'));
           transaction.set(movementRef, {
@@ -240,7 +245,6 @@ export const recipeService = {
           });
         }
       });
-      console.log('✅ Inventory deduction completed successfully');
     } catch (error) {
       console.error('❌ Error deducting inventory:', error);
       throw error;

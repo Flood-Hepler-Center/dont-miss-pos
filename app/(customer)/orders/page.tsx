@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useCartStore } from '@/lib/stores/cartStore';
 import type { Order } from '@/types';
@@ -94,7 +94,9 @@ export default function CustomerOrdersPage() {
                     <div>
                       <p className="text-xs font-bold">ORDER #{order.id.slice(-8).toUpperCase()}</p>
                       <p className="text-xs text-gray-600">
-                        {order.createdAt && new Date((order.createdAt as any).toMillis()).toLocaleTimeString()}
+                        {order.createdAt && typeof (order.createdAt as unknown as Timestamp).toMillis === 'function' 
+                          ? new Date((order.createdAt as unknown as Timestamp).toMillis()).toLocaleTimeString()
+                          : new Date(order.createdAt as unknown as Date).toLocaleTimeString()}
                       </p>
                     </div>
                     <div className={`px-3 py-1 border-2 border-black text-xs font-bold ${

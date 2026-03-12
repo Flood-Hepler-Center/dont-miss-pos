@@ -46,7 +46,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
     }
   };
 
-  const handleAddWithModifiers = (item: MenuItem, quantity: number, modifiers: any[]) => {
+  const handleAddWithModifiers = (item: MenuItem, quantity: number, modifiers: Array<{ groupId: string; optionId: string; optionName: string; priceAdjustment: number }>) => {
     addItem(item, quantity, modifiers);
     setAddedItemId(item.id);
     setTimeout(() => setAddedItemId(null), 600);
@@ -65,7 +65,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-4">
             <div className="text-sm">════════════</div>
-            <h1 className="text-2xl font-bold my-2">DON'T MISS THIS SATURDAY</h1>
+            <h1 className="text-2xl font-bold my-2">DON&apos;T MISS THIS SATURDAY</h1>
             <p className="text-xs">TABLE #{tableId}</p>
             <div className="text-sm">════════════</div>
           </div>

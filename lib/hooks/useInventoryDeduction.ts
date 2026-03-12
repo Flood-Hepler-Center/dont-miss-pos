@@ -28,8 +28,6 @@ export async function deductInventoryForOrder(items: Array<{ menuItem: MenuItem;
             currentStock: Math.max(0, currentStock - totalDeduction),
             lastUsed: new Date(),
           });
-
-          console.log(`Deducted ${totalDeduction} ${ingredient.unit} of ${ingredient.inventoryItemName}`);
         } catch (error) {
           console.error(`Failed to deduct inventory for ${ingredient.inventoryItemName}:`, error);
         }

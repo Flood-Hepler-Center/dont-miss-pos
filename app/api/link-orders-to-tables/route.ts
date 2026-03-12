@@ -4,8 +4,6 @@ import { collection, getDocs, doc, updateDoc, arrayUnion, serverTimestamp } from
 
 export async function POST() {
   try {
-    console.log('🔗 Linking existing orders to tables...');
-
     // Get all orders
     const ordersSnapshot = await getDocs(collection(db, 'orders'));
     const orders = ordersSnapshot.docs.map(doc => ({
@@ -16,7 +14,7 @@ export async function POST() {
     let linkedCount = 0;
 
     // Link each order to its table
-    for (const order of orders as any[]) {
+    for (const order of orders as Array<{ id: string; tableId?: string; status?: string }>) {
       if (order.tableId && order.status !== 'COMPLETED' && order.status !== 'CANCELLED') {
         const tableRef = doc(db, 'tables', order.tableId);
         
@@ -29,7 +27,6 @@ export async function POST() {
           });
           
           linkedCount++;
-          console.log(`✅ Linked order ${order.id} to table ${order.tableId}`);
         } catch (error) {
           console.error(`Failed to link order ${order.id}:`, error);
         }

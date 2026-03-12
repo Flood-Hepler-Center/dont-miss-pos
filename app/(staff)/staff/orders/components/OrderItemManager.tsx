@@ -23,7 +23,6 @@ export function OrderItemManager({ order, onUpdate }: OrderItemManagerProps) {
     }
 
     try {
-      console.log('Updating quantity:', { orderId: order.id, itemIndex, newQty });
       await orderService.updateQuantity(order.id, itemIndex, newQty);
       message.success('Item quantity updated');
       onUpdate();
@@ -35,7 +34,6 @@ export function OrderItemManager({ order, onUpdate }: OrderItemManagerProps) {
 
   const handleRemoveItem = async (itemIndex: number) => {
     try {
-      console.log('Removing item:', { orderId: order.id, itemIndex });
       await orderService.removeItem(order.id, itemIndex);
       message.success('Item removed from order');
       onUpdate();
@@ -49,7 +47,6 @@ export function OrderItemManager({ order, onUpdate }: OrderItemManagerProps) {
     try {
       const staffId = 'current-staff'; // TODO: Get from auth
       const reason = 'Staff comp';
-      console.log('Voiding item:', { orderId: order.id, itemIndex, reason, staffId });
       await orderService.voidItem(order.id, itemIndex, reason, staffId);
       message.success('Item voided (no charge)');
       onUpdate();

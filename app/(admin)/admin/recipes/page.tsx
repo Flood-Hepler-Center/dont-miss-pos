@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { MenuItem } from '@/types';
 
@@ -126,14 +126,14 @@ export default function RecipesPage() {
     });
   };
 
-  const handleUpdateIngredient = (index: number, field: keyof RecipeIngredient, value: any) => {
+  const handleUpdateIngredient = (index: number, field: keyof RecipeIngredient, value: string | number) => {
     const updated = [...formData.ingredients];
     if (field === 'inventoryItemId') {
-      const item = inventoryItems.find((i) => i.id === value);
+      const item = inventoryItems.find((i) => i.id === value as string);
       if (item) {
         updated[index] = {
           ...updated[index],
-          inventoryItemId: value,
+          inventoryItemId: value as string,
           inventoryItemName: item.name,
           unit: item.unit,
         };

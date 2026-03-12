@@ -45,7 +45,7 @@ export default function LoginPage() {
           {/* Header */}
           <div className="text-center mb-8">
             <div className="text-xl mb-2">════</div>
-            <h1 className="text-2xl font-bold mb-1">DON'T MISS THIS SATURDAY</h1>
+            <h1 className="text-2xl font-bold mb-1">DON&apos;T MISS THIS SATURDAY</h1>
             <p className="text-sm mb-2">STAFF LOGIN</p>
             <div className="text-xl">════</div>
           </div>

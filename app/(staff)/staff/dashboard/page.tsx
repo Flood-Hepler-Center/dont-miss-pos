@@ -151,7 +151,7 @@ export default function StaffDashboardPage() {
           {/* Today's Revenue */}
           <div className="border-2 border-black p-4">
             <div className="text-center">
-              <p className="text-xs mb-2">TODAY'S REVENUE</p>
+              <p className="text-xs mb-2">TODAY&apos;S REVENUE</p>
               <p className="text-4xl font-bold">฿{stats.todayRevenue.toFixed(0)}</p>
             </div>
           </div>

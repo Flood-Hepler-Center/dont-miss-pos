@@ -48,9 +48,11 @@ export type Order = {
   items: OrderItem[];
   subtotal: number;
   tax: number;
+  discount?: number;
   total: number;
   status: OrderStatus;
   entryMethod: 'QR' | 'MANUAL';
+  paymentMethod?: 'CASH' | 'PROMPTPAY' | 'CARD';
   createdBy?: string;
   createdAt: Date;
   updatedAt: Date;

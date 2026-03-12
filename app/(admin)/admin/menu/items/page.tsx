@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { menuService } from '@/lib/services/menu.service';
-import type { MenuItem, MenuCategory, ModifierGroup } from '@/types';
+import type { MenuItem, MenuCategory } from '@/types';
 import { ModifierManager } from '@/components/admin/ModifierManager';
 
 export default function MenuItemsPage() {

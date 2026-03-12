@@ -1,15 +1,21 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, where, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { format, startOfDay, endOfDay, subDays, startOfWeek, startOfMonth } from 'date-fns';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
+interface OrderItem {
+  name: string;
+  quantity: number;
+  price: number;
+}
+
 interface Order {
   id: string;
   tableId: string;
-  items: any[];
+  items: OrderItem[];
   subtotal: number;
   tax: number;
   total: number;
@@ -227,7 +233,7 @@ export default function AnalyticsPage() {
               <YAxis stroke="#000" style={{ fontSize: '12px' }} />
               <Tooltip
                 contentStyle={{ border: '2px solid black', fontFamily: 'monospace' }}
-                formatter={(value: any) => `฿${value.toFixed(2)}`}
+                formatter={(value: number) => `฿${value.toFixed(2)}`}
               />
               <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: '12px' }} />
               <Line type="monotone" dataKey="revenue" stroke="#000" strokeWidth={2} name="Revenue (฿)" />
@@ -248,7 +254,7 @@ export default function AnalyticsPage() {
                 <YAxis stroke="#000" style={{ fontSize: '10px' }} />
                 <Tooltip
                   contentStyle={{ border: '2px solid black', fontFamily: 'monospace' }}
-                  formatter={(value: any) => `฿${value.toFixed(0)}`}
+                  formatter={(value: number) => `฿${value.toFixed(0)}`}
                 />
                 <Bar dataKey="revenue" fill="#000" name="Revenue" />
               </BarChart>

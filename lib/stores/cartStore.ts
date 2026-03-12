@@ -40,8 +40,9 @@ function calculateItemTotal(
   
   // Check for absolute price modifiers (takes precedence)
   for (const mod of modifiers) {
-    if ((mod as any).priceMode === 'absolute' && (mod as any).absolutePrice) {
-      basePrice = (mod as any).absolutePrice;
+    const modifier = mod as { priceMode?: string; absolutePrice?: number; priceAdjustment?: number };
+    if (modifier.priceMode === 'absolute' && modifier.absolutePrice) {
+      basePrice = modifier.absolutePrice;
       hasAbsolutePrice = true;
       break; // Only one absolute price should apply
     }

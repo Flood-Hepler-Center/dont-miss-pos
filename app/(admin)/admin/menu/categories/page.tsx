@@ -243,7 +243,7 @@ export default function CategoriesPage() {
               </div>
               <div className="p-4">
                 <p className="text-sm text-center mb-6">
-                  This will hide the category. Associated items won't be affected.
+                  This will hide the category. Associated items won&apos;t be affected.
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <button

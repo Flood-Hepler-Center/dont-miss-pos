@@ -300,67 +300,18 @@ export default function EditOrderPage({ params }: EditOrderPageProps) {
                   </button>
                 ))}
               </div>
-            ))
-          )}
-        </div>
-
-        {/* Add Item Button */}
-        <div className="border-t-2 border-black p-3">
-          <button
-            onClick={() => setShowAddMenu(!showAddMenu)}
-            className="w-full px-4 py-2 border-2 border-black bg-white hover:bg-gray-100 font-bold text-sm flex items-center justify-center gap-2"
-          >
-            <Plus size={16} /> [ADD ITEM]
-          </button>
-        </div>
-      </div>
-
-      {/* Add Menu Item Modal */}
-      {showAddMenu && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="border-2 border-black bg-white max-w-2xl w-full max-h-[80vh] flex flex-col">
-            <div className="border-b-2 border-black p-3">
-              <h2 className="text-lg font-bold text-center">[ ADD MENU ITEM ]</h2>
-            </div>
-
-            <div className="p-3 border-b-2 border-black">
-              <input
-                type="text"
-                placeholder="SEARCH MENU..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-4 py-2 border-2 border-black focus:outline-none"
-              />
-            </div>
-
-            <div className="flex-1 overflow-y-auto divide-y-2 divide-black">
-              {filteredMenuItems.map((item) => (
+              
+              <div className="border-t-2 border-black p-3">
                 <button
-                  key={item.id}
-                  onClick={() => handleAddItem(item)}
-                  className="w-full p-3 hover:bg-gray-100 text-left"
+                  onClick={() => setShowAddMenu(false)}
+                  className="w-full px-4 py-2 border-2 border-black hover:bg-gray-100 font-bold text-sm"
                 >
-                  <div className="flex justify-between">
-                    <span className="font-bold text-sm">{item.name.toUpperCase()}</span>
-                    <span className="font-bold text-sm">฿{item.price.toFixed(2)}</span>
-                  </div>
-                  {item.description && (
-                    <p className="text-xs text-gray-600 mt-1">{item.description}</p>
-                  )}
+                  [CLOSE]
                 </button>
-              ))}
-            </div>
-
-            <div className="border-t-2 border-black p-3">
-              <button
-                onClick={() => setShowAddMenu(false)}
-                className="w-full px-4 py-2 border-2 border-black hover:bg-gray-100 font-bold text-sm"
-              >
-                [CLOSE]
-              </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Actions */}
         <div className="grid grid-cols-2 gap-3">

@@ -145,7 +145,7 @@ export const paymentService = {
 
       return await runTransaction(db, async (transaction) => {
         const paymentRef = doc(collection(db, 'payments'));
-        const paymentDoc: any = {
+        const paymentDoc: Record<string, unknown> = {
           receiptNumber,
           tableId: paymentData.tableId,
           orderIds: paymentData.orderIds,

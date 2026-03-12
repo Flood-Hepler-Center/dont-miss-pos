@@ -7,15 +7,12 @@ import {
   updateDoc,
   query,
   where,
-  orderBy,
   serverTimestamp,
-  writeBatch,
   arrayUnion,
-  runTransaction,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { recipeService } from './recipe.service';
-import type { Order, OrderStatus, OrderItem, CreateOrderInput } from '@/types';
+import type { Order, OrderStatus, CreateOrderInput } from '@/types';
 
 const VALID_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   PLACED: ['PREPARING', 'CANCELLED'],

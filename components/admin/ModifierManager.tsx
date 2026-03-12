@@ -23,7 +23,7 @@ export function ModifierManager({ modifiers, onChange }: ModifierManagerProps) {
     setExpandedGroup(newGroup.id);
   };
 
-  const updateGroup = (index: number, field: keyof ModifierGroup, value: any) => {
+  const updateGroup = (index: number, field: keyof ModifierGroup, value: string | boolean | number) => {
     const updated = [...modifiers];
     updated[index] = { ...updated[index], [field]: value };
     onChange(updated);
@@ -47,7 +47,7 @@ export function ModifierManager({ modifiers, onChange }: ModifierManagerProps) {
     onChange(updated);
   };
 
-  const updateOption = (groupIndex: number, optionIndex: number, field: keyof ModifierOption, value: any) => {
+  const updateOption = (groupIndex: number, optionIndex: number, field: keyof ModifierOption, value: string | number) => {
     const updated = [...modifiers];
     updated[groupIndex].options[optionIndex] = {
       ...updated[groupIndex].options[optionIndex],
@@ -78,7 +78,7 @@ export function ModifierManager({ modifiers, onChange }: ModifierManagerProps) {
       <div className="border-2 border-black p-3 space-y-3">
         {modifiers.length === 0 ? (
           <p className="text-xs text-gray-600 text-center py-4">
-            No options yet. Add groups like "Size", "Sugar Level", etc.
+            No options yet. Add groups like &quot;Size&quot;, &quot;Sugar Level&quot;, etc.
           </p>
         ) : (
           modifiers.map((group, groupIndex) => (

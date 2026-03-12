@@ -48,7 +48,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
             {/* Logo/Title */}
             <div className="flex items-center gap-4">
               <div className="text-sm">══════</div>
-              <h1 className="text-xl font-bold">DON'T MISS THIS SATURDAY</h1>
+              <h1 className="text-xl font-bold">DON&apos;T MISS THIS SATURDAY</h1>
               <div className="text-sm">══════</div>
             </div>
 

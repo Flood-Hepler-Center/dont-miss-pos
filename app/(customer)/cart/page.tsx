@@ -107,7 +107,7 @@ export default function CartPage() {
           <div className="sticky top-0 z-10 bg-white border-b-2 border-black px-4 py-4">
             <div className="text-center">
               <div className="text-sm">════════════</div>
-              <h1 className="text-2xl font-bold my-2">DON'T MISS THIS SATURDAY</h1>
+              <h1 className="text-2xl font-bold my-2">DON&apos;T MISS THIS SATURDAY</h1>
               <p className="text-xs">ORDER REVIEW - TABLE #{tableId}</p>
               <div className="text-sm">════════════</div>
             </div>
