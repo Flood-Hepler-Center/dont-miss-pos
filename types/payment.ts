@@ -124,7 +124,8 @@ export type DailySummary = {
 /** Receipt sequence tracker per day */
 export type ReceiptSequence = {
   id: string;
-  currentSequence: number;
+  date: string;
+  lastSequence: number;
   updatedAt: Date;
 };
 

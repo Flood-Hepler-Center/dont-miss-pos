@@ -2,6 +2,7 @@
  * Menu & Category Types
  * Source: BA Data Model - dm-menu-inventory.md
  */
+import { RecipeIngredient } from './inventory';
 
 /** Menu category for grouping items (e.g., "Food", "Beverages") */
 export type MenuCategory = {
@@ -59,13 +60,6 @@ export type ModifierOption = {
   recipeMultiplier?: number;              // Multiplier for recipe ingredients (e.g., Size S = 1.0, L = 2.0)
 };
 
-/** Recipe ingredient linking menu item to inventory */
-export type RecipeIngredient = {
-  inventoryItemId: string;
-  inventoryItemName: string;
-  quantity: number;
-  unit: string;
-};
 
 /** Input type for creating a new category */
 export type CreateCategoryInput = {

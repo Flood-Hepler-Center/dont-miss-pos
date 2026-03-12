@@ -6,6 +6,7 @@ import { db } from '@/lib/firebase/config';
 import { menuService } from '@/lib/services/menu.service';
 import type { MenuItem, MenuCategory } from '@/types';
 import { ModifierManager } from '@/components/admin/ModifierManager';
+import Image from 'next/image';
 
 export default function MenuItemsPage() {
   const [items, setItems] = useState<MenuItem[]>([]);
@@ -219,7 +220,15 @@ export default function MenuItemsPage() {
                   <div className="grid grid-cols-7 gap-4 text-sm items-center">
                     <div>
                       {item.imageUrl ? (
-                        <img src={item.imageUrl} alt={item.name} className="w-12 h-12 object-cover border border-black" />
+                        <div className="relative w-12 h-12">
+                          <Image 
+                            src={item.imageUrl} 
+                            alt={item.name} 
+                            fill 
+                            className="object-cover border border-black"
+                            unoptimized
+                          />
+                        </div>
                       ) : (
                         <div className="w-12 h-12 border-2 border-dashed border-black" />
                       )}
@@ -276,7 +285,15 @@ export default function MenuItemsPage() {
               <div key={item.id} className="border-2 border-black p-4">
                 <div className="flex gap-3 mb-3">
                   {item.imageUrl ? (
-                    <img src={item.imageUrl} alt={item.name} className="w-16 h-16 object-cover border border-black" />
+                    <div className="relative w-16 h-16 shrink-0">
+                      <Image 
+                        src={item.imageUrl} 
+                        alt={item.name} 
+                        fill 
+                        className="object-cover border border-black"
+                        unoptimized
+                      />
+                    </div>
                   ) : (
                     <div className="w-16 h-16 border-2 border-dashed border-black" />
                   )}
@@ -387,7 +404,15 @@ export default function MenuItemsPage() {
                   <div className="border-2 border-black p-3">
                     {imagePreview ? (
                       <div className="space-y-2">
-                        <img src={imagePreview} alt="Preview" className="w-full h-32 object-cover border border-black" />
+                        <div className="relative w-full h-32">
+                          <Image 
+                            src={imagePreview} 
+                            alt="Preview" 
+                            fill 
+                            className="object-cover border border-black"
+                            unoptimized
+                          />
+                        </div>
                         <button
                           type="button"
                           onClick={() => {

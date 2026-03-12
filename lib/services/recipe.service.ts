@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   runTransaction,
 } from 'firebase/firestore';
-import type { Recipe, InventoryItem, StockMovement } from '@/types/recipe';
+import type { Recipe, InventoryItem, StockMovement } from '@/types';
 
 export const recipeService = {
   async create(recipeData: Omit<Recipe, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
@@ -116,7 +116,8 @@ export const recipeService = {
         }
 
         const inventoryItem = inventoryDoc.data() as InventoryItem;
-        const requiredQty = (ingredient.quantity * quantity * recipeMultiplier) / recipe.yield;
+        const recipeYield = recipe.yield || 1;
+        const requiredQty = (ingredient.quantity * quantity * recipeMultiplier) / recipeYield;
 
         if (inventoryItem.currentStock < requiredQty) {
           missingIngredients.push(
@@ -161,9 +162,17 @@ export const recipeService = {
         }
 
         // Validate recipe.yield to prevent NaN
-        if (!recipe.yield || recipe.yield <= 0) {
-          console.error(`❌ Invalid recipe yield for ${item.name}: ${recipe.yield}. Recipe must have yield > 0. Skipping inventory deduction.`);
-          continue;
+        const recipeYield = recipe.yield || 1;
+        if (recipeYield <= 0 || recipe.yield === undefined) {
+          console.error(`❌ Recipe yield check for ${item.name}:`, { 
+            yield: recipe.yield, 
+            fallbackYield: recipeYield,
+            recipeId: recipe.id 
+          });
+          if (recipeYield <= 0) {
+            console.error(`❌ Invalid recipe yield for ${item.name}: ${recipeYield}. Recipe must have yield > 0. Skipping inventory deduction.`);
+            continue;
+          }
         }
 
         // Calculate recipe multiplier from modifiers
@@ -193,7 +202,8 @@ export const recipeService = {
             }
 
             const inventoryItem = inventoryDoc.data() as InventoryItem;
-            const deductQty = (ingredient.quantity * item.quantity * recipeMultiplier) / recipe.yield;
+            const recipeYield = recipe.yield || 1;
+            const deductQty = (ingredient.quantity * item.quantity * recipeMultiplier) / recipeYield;
             
             // Safety check: Ensure deductQty is a valid number
             if (!Number.isFinite(deductQty) || deductQty < 0) {
@@ -217,11 +227,11 @@ export const recipeService = {
               id: '',
               inventoryItemId: ingredient.inventoryItemId,
               inventoryItemName: ingredient.inventoryItemName,
-              movementType: 'OUT',
+              type: 'DEDUCTION',
               quantity: deductQty,
               unit: ingredient.unit,
               reason: `Order ${orderId} - ${item.name} x${item.quantity}`,
-              orderId,
+              relatedOrderId: orderId,
               performedBy: 'system',
               timestamp: new Date(),
               previousStock: inventoryItem.currentStock,

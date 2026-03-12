@@ -3,29 +3,8 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import type { MenuItem } from '@/types';
+import type { MenuItem, Recipe, RecipeIngredient, InventoryItem } from '@/types';
 
-interface RecipeIngredient {
-  inventoryItemId: string;
-  inventoryItemName: string;
-  quantity: number;
-  unit: string;
-}
-
-interface Recipe {
-  id: string;
-  menuItemId: string;
-  menuItemName: string;
-  ingredients: RecipeIngredient[];
-  isActive: boolean;
-}
-
-interface InventoryItem {
-  id: string;
-  name: string;
-  currentStock: number;
-  unit: string;
-}
 
 export default function RecipesPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -38,6 +17,7 @@ export default function RecipesPage() {
   const [formData, setFormData] = useState({
     menuItemId: '',
     ingredients: [] as RecipeIngredient[],
+    yield: 1,
   });
 
   useEffect(() => {
@@ -89,6 +69,7 @@ export default function RecipesPage() {
     setFormData({
       menuItemId: '',
       ingredients: [],
+      yield: 1,
     });
     setModalVisible(true);
   };
@@ -98,6 +79,7 @@ export default function RecipesPage() {
     setFormData({
       menuItemId: recipe.menuItemId,
       ingredients: recipe.ingredients,
+      yield: recipe.yield || 1,
     });
     setModalVisible(true);
   };
@@ -157,6 +139,7 @@ export default function RecipesPage() {
         menuItemId: formData.menuItemId,
         menuItemName: menuItem.name,
         ingredients: formData.ingredients,
+        yield: formData.yield || 1,
         isActive: true,
       };
 
@@ -167,7 +150,7 @@ export default function RecipesPage() {
         await setDoc(newRecipeRef, recipeData);
       }
       setModalVisible(false);
-      setFormData({ menuItemId: '', ingredients: [] });
+      setFormData({ menuItemId: '', ingredients: [], yield: 1 });
     } catch (error) {
       console.error('Failed to save recipe:', error);
       alert('Failed to save recipe');
@@ -367,6 +350,20 @@ export default function RecipesPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold mb-2">YIELD (SERVINGS PER RECIPE) *</label>
+                  <input
+                    type="number"
+                    value={formData.yield}
+                    onChange={(e) => setFormData({ ...formData, yield: parseFloat(e.target.value) || 1 })}
+                    className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
+                    min={0.1}
+                    step={0.1}
+                    required
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1 italic">Example: If this recipe makes 10 chicken pops, set yield to 10.</p>
                 </div>
 
                 <div>

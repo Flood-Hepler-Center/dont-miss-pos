@@ -3,6 +3,7 @@
 import { Form, Input, InputNumber, Select, Upload, Button, Switch } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import { useState } from 'react';
+import Image from 'next/image';
 import type { MenuCategory, MenuItem } from '@/types';
 
 interface MenuItemFormProps {
@@ -113,7 +114,15 @@ export function MenuItemForm({ item, categories, onSave, onCancel, loading }: Me
           <Button icon={<UploadOutlined />}>Upload Image</Button>
         </Upload>
         {imageUrl && (
-          <img src={imageUrl} alt="preview" className="mt-2 w-32 h-32 object-cover rounded" />
+          <div className="relative mt-2 w-32 h-32">
+            <Image 
+              src={imageUrl} 
+              alt="preview" 
+              fill 
+              className="object-cover rounded" 
+              unoptimized
+            />
+          </div>
         )}
       </Form.Item>
 

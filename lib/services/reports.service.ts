@@ -7,6 +7,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { Order } from '@/types';
+import type { Payment } from '@/types/payment';
 
 export interface EODReport {
   totalRevenue: number;
@@ -18,6 +19,79 @@ export interface EODReport {
   promptpayPayments: number;
   cardPayments: number;
   taxCollected: number;
+}
+
+export interface DetailedOrder {
+  id: string;
+  tableId: string;
+  createdAt: string;
+  status: string;
+  paymentMethod: string;
+  subtotal: number;
+  tax: number;
+  discount: number;
+  total: number;
+  itemsCount: number;
+  itemsNames: string;
+}
+
+export interface DetailedOrderReport {
+  orders: DetailedOrder[];
+}
+
+export interface ItemSummaryDetail {
+  name: string;
+  category: string;
+  quantity: number;
+  revenue: number;
+  avgPrice: number;
+}
+
+export interface ItemsSummaryDetailReport {
+  items: ItemSummaryDetail[];
+}
+
+export interface ItemDetail {
+  orderId: string;
+  tableId: string;
+  createdAt: string;
+  menuItemId: string;
+  itemName: string;
+  quantity: number;
+  price: number;
+  subtotal: number;
+  modifiers: string;
+  status: string;
+}
+
+export interface ItemsDetailReport {
+  items: ItemDetail[];
+}
+
+export interface DetailedPayment {
+  id: string;
+  receiptNumber: string;
+  tableId: string;
+  processedAt: string;
+  subtotal: number;
+  discountAmount: number;
+  tax: number;
+  total: number;
+  paymentMethod: string;
+  status: string;
+  orderIds: string;
+}
+
+export interface PaymentDetailReport {
+  payments: DetailedPayment[];
+}
+
+export interface UltimatePaymentDetail extends DetailedPayment {
+  orders: (Order & { id: string })[];
+}
+
+export interface UltimateReport {
+  payments: UltimatePaymentDetail[];
 }
 
 export interface SalesSummaryReport {
@@ -68,14 +142,14 @@ export const reportsService = {
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
 
-      const q = query(
-        collection(db, 'orders'),
+      // 1. Get financial data from payments collection
+      const paymentsQuery = query(
+        collection(db, 'payments'),
         where('createdAt', '>=', Timestamp.fromDate(startOfDay)),
         where('createdAt', '<=', Timestamp.fromDate(endOfDay))
       );
-
-      const snapshot = await getDocs(q);
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const paymentsSnapshot = await getDocs(paymentsQuery);
+      const payments = paymentsSnapshot.docs.map(doc => doc.data());
 
       let totalRevenue = 0;
       let totalDiscounts = 0;
@@ -84,24 +158,33 @@ export const reportsService = {
       let cardPayments = 0;
       let taxCollected = 0;
 
-      orders.forEach(order => {
-        if (order.status !== 'CANCELLED') {
-          totalRevenue += order.total || 0;
-          totalDiscounts += order.discount || 0;
-          taxCollected += order.tax || 0;
+      payments.forEach(pay => {
+        if (pay.status !== 'VOIDED') {
+          totalRevenue += pay.total || 0;
+          totalDiscounts += pay.discountAmount || 0;
+          taxCollected += pay.tax || 0;
 
-          // Aggregate by payment method if available
-          if (order.paymentMethod === 'CASH') {
-            cashPayments += order.total || 0;
-          } else if (order.paymentMethod === 'PROMPTPAY') {
-            promptpayPayments += order.total || 0;
-          } else if (order.paymentMethod === 'CARD') {
-            cardPayments += order.total || 0;
+          const method = pay.paymentMethod?.toUpperCase();
+          if (method === 'CASH') {
+            cashPayments += pay.total || 0;
+          } else if (method === 'PROMPTPAY') {
+            promptpayPayments += pay.total || 0;
+          } else if (method === 'CARD') {
+            cardPayments += pay.total || 0;
           }
         }
       });
 
+      // 2. Get operational data from orders collection
+      const ordersQuery = query(
+        collection(db, 'orders'),
+        where('createdAt', '>=', Timestamp.fromDate(startOfDay)),
+        where('createdAt', '<=', Timestamp.fromDate(endOfDay))
+      );
+      const ordersSnapshot = await getDocs(ordersQuery);
+      const orders = ordersSnapshot.docs.map(doc => doc.data() as Order);
       const completedOrders = orders.filter(o => o.status !== 'CANCELLED');
+
       const avgOrderValue = completedOrders.length > 0 ? totalRevenue / completedOrders.length : 0;
 
       return {
@@ -126,51 +209,62 @@ export const reportsService = {
    */
   async generateSalesSummaryReport(startDate: Date, endDate: Date): Promise<SalesSummaryReport> {
     try {
-      const q = query(
+      // 1. Financial data from payments
+      const paymentsQuery = query(
+        collection(db, 'payments'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+      const paymentsSnapshot = await getDocs(paymentsQuery);
+      const payments = paymentsSnapshot.docs
+        .map(doc => doc.data())
+        .filter(p => p.status !== 'VOIDED');
+
+      let totalRevenue = 0;
+      const dailyRevenueMap = new Map<string, number>();
+
+      payments.forEach(pay => {
+        totalRevenue += pay.total || 0;
+        const date = pay.createdAt instanceof Timestamp ? pay.createdAt.toDate() : new Date(pay.createdAt);
+        const dateKey = date.toISOString().split('T')[0];
+        dailyRevenueMap.set(dateKey, (dailyRevenueMap.get(dateKey) || 0) + (pay.total || 0));
+      });
+
+      // 2. Operational data from orders
+      const ordersQuery = query(
         collection(db, 'orders'),
         where('createdAt', '>=', Timestamp.fromDate(startDate)),
         where('createdAt', '<=', Timestamp.fromDate(endDate))
       );
+      const ordersSnapshot = await getDocs(ordersQuery);
+      const orders = ordersSnapshot.docs.map(doc => doc.data() as Order);
 
-      const snapshot = await getDocs(q);
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
-
-      let totalRevenue = 0;
-      const completedOrders = orders.filter(o => o.status === 'COMPLETED' || o.status === 'SERVED');
-      const cancelledOrders = orders.filter(o => o.status === 'CANCELLED');
-
-      completedOrders.forEach(order => {
-        totalRevenue += order.total || 0;
-      });
-
-      const avgOrderValue = completedOrders.length > 0 ? totalRevenue / completedOrders.length : 0;
-
-      // Daily breakdown
-      const dailyMap = new Map<string, { revenue: number; orders: number }>();
-      completedOrders.forEach(order => {
-        const date = order.createdAt instanceof Timestamp 
-          ? order.createdAt.toDate() 
-          : new Date(order.createdAt);
+      const completedOrdersCount = orders.filter(o => ['COMPLETED', 'SERVED'].includes(o.status)).length;
+      const cancelledOrdersCount = orders.filter(o => o.status === 'CANCELLED').length;
+      
+      const dailyOrdersMap = new Map<string, number>();
+      orders.filter(o => ['COMPLETED', 'SERVED'].includes(o.status)).forEach(order => {
+        const date = order.createdAt instanceof Timestamp ? order.createdAt.toDate() : new Date(order.createdAt);
         const dateKey = date.toISOString().split('T')[0];
-        
-        const existing = dailyMap.get(dateKey) || { revenue: 0, orders: 0 };
-        existing.revenue += order.total || 0;
-        existing.orders += 1;
-        dailyMap.set(dateKey, existing);
+        dailyOrdersMap.set(dateKey, (dailyOrdersMap.get(dateKey) || 0) + 1);
       });
 
-      const dailyBreakdown = Array.from(dailyMap.entries()).map(([date, data]) => ({
-        date,
-        revenue: data.revenue,
-        orders: data.orders,
-      })).sort((a, b) => a.date.localeCompare(b.date));
+      // 3. Merged breakdown
+      const allDates = Array.from(new Set([...dailyRevenueMap.keys(), ...dailyOrdersMap.keys()])).sort();
+      const dailyBreakdown = allDates.map(dateKey => ({
+        date: dateKey,
+        revenue: dailyRevenueMap.get(dateKey) || 0,
+        orders: dailyOrdersMap.get(dateKey) || 0
+      }));
+
+      const avgOrderValue = completedOrdersCount > 0 ? totalRevenue / completedOrdersCount : 0;
 
       return {
         totalRevenue,
         totalOrders: orders.length,
         avgOrderValue,
-        completedOrders: completedOrders.length,
-        cancelledOrders: cancelledOrders.length,
+        completedOrders: completedOrdersCount,
+        cancelledOrders: cancelledOrdersCount,
         dailyBreakdown,
       };
     } catch (error) {
@@ -184,15 +278,17 @@ export const reportsService = {
    */
   async generateTopItemsReport(startDate: Date, endDate: Date, topN: number = 10): Promise<TopItemsReport> {
     try {
+      // Fetch by date only to avoid composite index requirement
       const q = query(
         collection(db, 'orders'),
         where('createdAt', '>=', Timestamp.fromDate(startDate)),
-        where('createdAt', '<=', Timestamp.fromDate(endDate)),
-        where('status', 'in', ['COMPLETED', 'SERVED'])
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
       );
 
       const snapshot = await getDocs(q);
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const orders = snapshot.docs
+        .map(doc => doc.data() as Order)
+        .filter(o => ['COMPLETED', 'SERVED'].includes(o.status));
 
       // Aggregate items
       const itemMap = new Map<string, { quantity: number; revenue: number }>();
@@ -229,16 +325,17 @@ export const reportsService = {
    */
   async generateCategoryPerformanceReport(startDate: Date, endDate: Date): Promise<CategoryPerformanceReport> {
     try {
-      // Fetch orders
+      // Fetch orders by date only
       const ordersQuery = query(
         collection(db, 'orders'),
         where('createdAt', '>=', Timestamp.fromDate(startDate)),
-        where('createdAt', '<=', Timestamp.fromDate(endDate)),
-        where('status', 'in', ['COMPLETED', 'SERVED'])
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
       );
 
       const ordersSnapshot = await getDocs(ordersQuery);
-      const orders = ordersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const orders = ordersSnapshot.docs
+        .map(doc => doc.data() as Order)
+        .filter(o => ['COMPLETED', 'SERVED'].includes(o.status));
 
       // Fetch menu items to get categories
       const menuItemsSnapshot = await getDocs(collection(db, 'menuItems'));
@@ -295,14 +392,15 @@ export const reportsService = {
   async generatePaymentMethodsReport(startDate: Date, endDate: Date): Promise<PaymentMethodsReport> {
     try {
       const q = query(
-        collection(db, 'orders'),
+        collection(db, 'payments'),
         where('createdAt', '>=', Timestamp.fromDate(startDate)),
-        where('createdAt', '<=', Timestamp.fromDate(endDate)),
-        where('status', 'in', ['COMPLETED', 'SERVED'])
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
       );
 
       const snapshot = await getDocs(q);
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const payments = snapshot.docs
+        .map(doc => doc.data())
+        .filter(p => p.status !== 'VOIDED');
 
       const result: PaymentMethodsReport = {
         cash: { count: 0, total: 0 },
@@ -310,9 +408,9 @@ export const reportsService = {
         card: { count: 0, total: 0 },
       };
 
-      orders.forEach(order => {
-        const total = order.total || 0;
-        const method = order.paymentMethod?.toLowerCase();
+      payments.forEach(pay => {
+        const total = pay.total || 0;
+        const method = pay.paymentMethod?.toLowerCase();
 
         if (method === 'cash') {
           result.cash.count++;
@@ -329,6 +427,257 @@ export const reportsService = {
       return result;
     } catch (error) {
       console.error('Error generating payment methods report:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Generate Detailed Order report
+   */
+  async generateDetailedOrderReport(startDate: Date, endDate: Date): Promise<DetailedOrderReport> {
+    try {
+      const q = query(
+        collection(db, 'orders'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+
+      const snapshot = await getDocs(q);
+      const orders = snapshot.docs.map(doc => {
+        const data = doc.data() as Order;
+        const createdAt = data.createdAt instanceof Timestamp 
+          ? data.createdAt.toDate().toISOString() 
+          : new Date(data.createdAt).toISOString();
+
+        return {
+          id: doc.id,
+          tableId: data.tableId || 'N/A',
+          createdAt,
+          status: data.status,
+          paymentMethod: data.paymentMethod || 'N/A',
+          subtotal: data.subtotal || 0,
+          tax: data.tax || 0,
+          discount: data.discount || 0,
+          total: data.total || 0,
+          itemsCount: data.items?.reduce((acc, item) => acc + (item.isVoided ? 0 : item.quantity), 0) || 0,
+          itemsNames: data.items?.filter(i => !i.isVoided).map(i => `${i.name} (x${i.quantity})`).join('; ') || '',
+        };
+      });
+
+      return { orders: orders.sort((a, b) => b.createdAt.localeCompare(a.createdAt)) };
+    } catch (error) {
+      console.error('Error generating detailed order report:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Generate Items Summary Detail report (Full version)
+   */
+  async generateItemsSummaryReport(startDate: Date, endDate: Date): Promise<ItemsSummaryDetailReport> {
+    try {
+      // Fetch by date only to avoid composite index requirement for status
+      const ordersQuery = query(
+        collection(db, 'orders'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+
+      const ordersSnapshot = await getDocs(ordersQuery);
+      // Filter by status in-memory
+      const orders = ordersSnapshot.docs
+        .map(doc => doc.data() as Order)
+        .filter(o => ['COMPLETED', 'SERVED'].includes(o.status));
+
+      // Fetch menu items to get categories
+      const menuItemsSnapshot = await getDocs(collection(db, 'menuItems'));
+      const menuItemsMap = new Map();
+      menuItemsSnapshot.docs.forEach(doc => {
+        menuItemsMap.set(doc.id, { ...doc.data(), id: doc.id });
+      });
+
+      const categoriesSnapshot = await getDocs(collection(db, 'menuCategories'));
+      const categoriesMap = new Map();
+      categoriesSnapshot.docs.forEach(doc => {
+        categoriesMap.set(doc.id, doc.data().name);
+      });
+
+      const itemMap = new Map<string, { quantity: number; revenue: number; category: string }>();
+
+      orders.forEach(order => {
+        order.items?.forEach(item => {
+          if (!item.isVoided) {
+            const menuItem = menuItemsMap.get(item.menuItemId);
+            const categoryName = menuItem?.categoryId ? categoriesMap.get(menuItem.categoryId) || 'Uncategorized' : 'Uncategorized';
+            
+            const existing = itemMap.get(item.name) || { quantity: 0, revenue: 0, category: categoryName };
+            existing.quantity += item.quantity;
+            existing.revenue += item.subtotal || (item.price * item.quantity);
+            itemMap.set(item.name, existing);
+          }
+        });
+      });
+
+      const items = Array.from(itemMap.entries())
+        .map(([name, data]) => ({
+          name,
+          category: data.category,
+          quantity: data.quantity,
+          revenue: data.revenue,
+          avgPrice: data.quantity > 0 ? data.revenue / data.quantity : 0,
+        }))
+        .sort((a, b) => b.revenue - a.revenue);
+
+      return { items };
+    } catch (error) {
+      console.error('Error generating items summary report:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Generate Items Detail report
+   */
+  async generateItemsDetailReport(startDate: Date, endDate: Date): Promise<ItemsDetailReport> {
+    try {
+      const q = query(
+        collection(db, 'orders'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+
+      const snapshot = await getDocs(q);
+      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+
+      const items: ItemDetail[] = [];
+
+      orders.forEach(order => {
+        const orderCreatedAt = order.createdAt instanceof Timestamp 
+          ? order.createdAt.toDate().toISOString() 
+          : new Date(order.createdAt).toISOString();
+
+        order.items?.forEach(item => {
+          items.push({
+            orderId: order.id,
+            tableId: order.tableId || 'N/A',
+            createdAt: orderCreatedAt,
+            menuItemId: item.menuItemId,
+            itemName: item.name,
+            quantity: item.quantity,
+            price: item.price,
+            subtotal: item.subtotal,
+            modifiers: item.modifiers?.map(m => `${m.modifierGroupName}: ${m.optionName}`).join('; ') || '',
+            status: item.isVoided ? 'VOIDED' : order.status,
+          });
+        });
+      });
+
+      return { items: items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)) };
+    } catch (error) {
+      console.error('Error generating items detail report:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Generate Payment Detail report (Full version for owner)
+   */
+  async generatePaymentDetailReport(startDate: Date, endDate: Date): Promise<PaymentDetailReport> {
+    try {
+      const q = query(
+        collection(db, 'payments'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+
+      const snapshot = await getDocs(q);
+      const payments = snapshot.docs.map(doc => {
+        const data = doc.data();
+        const processedAt = data.processedAt instanceof Timestamp 
+          ? data.processedAt.toDate().toISOString() 
+          : data.processedAt ? new Date(data.processedAt).toISOString() : 'N/A';
+
+        return {
+          id: doc.id,
+          receiptNumber: data.receiptNumber || 'N/A',
+          tableId: data.tableId || 'N/A',
+          processedAt,
+          subtotal: data.subtotal || 0,
+          discountAmount: data.discountAmount || 0,
+          tax: data.tax || 0,
+          total: data.total || 0,
+          paymentMethod: data.paymentMethod || 'N/A',
+          status: data.status || 'N/A',
+          orderIds: data.orderIds?.join('; ') || '',
+        };
+      });
+
+      return { payments: payments.sort((a, b) => b.processedAt.localeCompare(a.processedAt)) };
+    } catch (error) {
+      console.error('Error generating payment detail report:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Ultimate Report: Joins Payments -> Orders -> Items
+   */
+  async generateUltimateReport(startDate: Date, endDate: Date): Promise<UltimateReport> {
+    try {
+      // 1. Fetch payments for range
+      const paymentsQuery = query(
+        collection(db, 'payments'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+      const paymentsSnapshot = await getDocs(paymentsQuery);
+      const paymentsData = paymentsSnapshot.docs.map(doc => {
+        const data = doc.data() as Payment;
+        return { ...data, id: doc.id };
+      });
+
+      // 2. Fetch orders for range (to avoid many individual fetches)
+      const ordersQuery = query(
+        collection(db, 'orders'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+      const ordersSnapshot = await getDocs(ordersQuery);
+      const ordersMap = new Map<string, Order & { id: string }>();
+      ordersSnapshot.docs.forEach(doc => {
+        const data = doc.data() as Order;
+        ordersMap.set(doc.id, { ...data, id: doc.id });
+      });
+
+      // 3. Merge
+      const result: UltimatePaymentDetail[] = paymentsData.map(pay => {
+        const processedAt = pay.processedAt instanceof Timestamp 
+          ? pay.processedAt.toDate().toISOString() 
+          : pay.processedAt ? new Date(pay.processedAt).toISOString() : 'N/A';
+
+        const linkedOrders = (pay.orderIds || [])
+          .map((id: string) => ordersMap.get(id))
+          .filter(Boolean) as (Order & { id: string })[];
+
+        return {
+          id: pay.id,
+          receiptNumber: pay.receiptNumber || 'N/A',
+          tableId: pay.tableId || 'N/A',
+          processedAt,
+          subtotal: pay.subtotal || 0,
+          discountAmount: pay.discountAmount || 0,
+          tax: pay.tax || 0,
+          total: pay.total || 0,
+          paymentMethod: pay.paymentMethod || 'N/A',
+          status: pay.status || 'N/A',
+          orderIds: pay.orderIds?.join('; ') || '',
+          orders: linkedOrders,
+        };
+      });
+
+      return { payments: result.sort((a, b) => b.processedAt.localeCompare(a.processedAt)) };
+    } catch (error) {
+      console.error('Error generating ultimate report:', error);
       throw error;
     }
   },

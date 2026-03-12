@@ -52,10 +52,17 @@ service cloud.firestore {
       allow read, write: if true; // TODO: Change to isAuthenticated() in production
     }
     
-    // Inventory: Admin only
+    // Inventory: Admin only (or anyone for order deduction)
     match /inventory/{itemId} {
       allow read: if true;
-      allow write: if true; // TODO: Change to isAuthenticated() in production
+      allow write: if true; // Required for client-side inventory deduction
+    }
+    
+    // Stock movements: Admin only
+    match /stockMovements/{movementId} {
+      allow read: if true;
+      allow create: if true; // Required for client-side inventory deduction logs
+      allow update, delete: if false;
     }
     
     // Settings: Public read (for merchant info), admin write

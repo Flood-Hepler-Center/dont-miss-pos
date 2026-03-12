@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import type { Payment } from '@/types';
 import { format } from 'date-fns';
 
 interface OrderItem {
@@ -33,6 +34,7 @@ export default function OrdersManagementPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [payments, setPayments] = useState<Payment[]>([]);
 
   useEffect(() => {
     const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
@@ -57,6 +59,45 @@ export default function OrdersManagementPage() {
 
     return () => unsubscribe();
   }, []);
+
+  // Fetch payments for financial accuracy
+  useEffect(() => {
+    // Generate date range based on dateFilter
+    const now = new Date();
+    let startDate: Date;
+    
+    if (dateFilter === 'today') {
+      startDate = new Date(now);
+      startDate.setHours(0, 0, 0, 0);
+    } else if (dateFilter === 'week') {
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - 7);
+    } else if (dateFilter === 'month') {
+      startDate = new Date(now);
+      startDate.setMonth(startDate.getMonth() - 1);
+    } else {
+      startDate = new Date(2024, 0, 1); // Default to a reasonable start date
+    }
+
+    const paymentsQuery = query(
+      collection(db, 'payments'),
+      where('createdAt', '>=', startDate),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(paymentsQuery, (snapshot) => {
+      const paymentsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
+      })) as Payment[];
+      
+      // Filter out VOIDED payments for revenue
+      setPayments(paymentsData.filter(p => p.status !== 'VOIDED'));
+    });
+
+    return () => unsubscribe();
+  }, [dateFilter]);
 
   useEffect(() => {
     let filtered = [...orders];
@@ -85,9 +126,10 @@ export default function OrdersManagementPage() {
   }, [orders, dateFilter, statusFilter]);
 
   // Calculate stats
-  const totalRevenue = filteredOrders.reduce((sum, order) => sum + order.total, 0);
+  // Calculate stats from payments for accuracy
+  const totalRevenue = payments.reduce((sum, p) => sum + p.total, 0);
   const totalOrders = filteredOrders.length;
-  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+  const avgOrderValue = payments.length > 0 ? totalRevenue / payments.length : 0;
   const completedOrders = filteredOrders.filter((o) => o.status === 'COMPLETED').length;
 
   const statusCounts = {

@@ -35,6 +35,27 @@ export type InventoryItem = {
   lastRestockedAt?: Date;
 };
 
+/** Recipe ingredient linking menu item to inventory */
+export type RecipeIngredient = {
+  inventoryItemId: string;
+  inventoryItemName: string;
+  quantity: number;
+  unit: string;
+};
+
+/** Recipe definition for a menu item */
+export type Recipe = {
+  id: string;
+  menuItemId: string;
+  menuItemName: string;
+  ingredients: RecipeIngredient[];
+  yield: number; // How many servings this recipe makes
+  notes?: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 /** Stock movement record for audit trail */
 export type StockMovement = {
   id: string;
@@ -42,6 +63,7 @@ export type StockMovement = {
   inventoryItemName: string;
   type: MovementType;
   quantity: number;
+  unit: string;
   reason: string;
   relatedOrderId?: string;
   performedBy: string;

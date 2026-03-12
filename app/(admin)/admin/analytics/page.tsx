@@ -24,14 +24,30 @@ interface Order {
   createdAt: Date;
 }
 
+interface Payment {
+  id: string;
+  total: number;
+  subtotal: number;
+  tax: number;
+  discountAmount: number;
+  paymentMethod: string;
+  status: string;
+  processedAt: Date;
+  createdAt: Date;
+}
+
 export default function AnalyticsPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
   const [dateRange, setDateRange] = useState('today');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Sync fetch for both
     const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
+    const paymentsQuery = query(collection(db, 'payments'), orderBy('createdAt', 'desc'));
+
+    const unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {
       const ordersData = snapshot.docs.map((doc) => {
         const data = doc.data();
         return {
@@ -47,10 +63,31 @@ export default function AnalyticsPage() {
         };
       }) as Order[];
       setOrders(ordersData);
+    });
+
+    const unsubscribePayments = onSnapshot(paymentsQuery, (snapshot) => {
+      const paymentsData = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          total: data.total || 0,
+          subtotal: data.subtotal || 0,
+          tax: data.tax || 0,
+          discountAmount: data.discountAmount || 0,
+          paymentMethod: data.paymentMethod || 'UNKNOWN',
+          status: data.status,
+          processedAt: data.processedAt?.toDate?.() || data.createdAt?.toDate?.() || new Date(),
+          createdAt: data.createdAt?.toDate?.() || new Date(),
+        };
+      }) as Payment[];
+      setPayments(paymentsData);
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeOrders();
+      unsubscribePayments();
+    };
   }, []);
 
   const getFilteredOrders = () => {
@@ -80,25 +117,46 @@ export default function AnalyticsPage() {
     return orders.filter((order) => order.createdAt >= startDate);
   };
 
-  const filteredOrders = getFilteredOrders();
-  const completedOrders = filteredOrders.filter((o) => o.status === 'COMPLETED');
+  const getFilteredPayments = () => {
+    const now = new Date();
+    let startDate: Date;
 
-  // Revenue Stats
-  const totalRevenue = completedOrders.reduce((sum, order) => sum + order.total, 0);
+    switch (dateRange) {
+      case 'today': startDate = startOfDay(now); break;
+      case 'week': startDate = startOfWeek(now); break;
+      case 'month': startDate = startOfMonth(now); break;
+      case '7days': startDate = subDays(now, 7); break;
+      case '30days': startDate = subDays(now, 30); break;
+      default: return payments;
+    }
+
+    return payments.filter((pay) => pay.createdAt >= startDate);
+  };
+
+  const filteredOrders = getFilteredOrders();
+  const filteredPayments = getFilteredPayments();
+  
+  // Operational Metrics (Orders)
+  const completedOrders = filteredOrders.filter((o) => o.status === 'COMPLETED');
   const totalOrders = completedOrders.length;
+  const totalItemsSold = completedOrders.reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0);
+
+  // Financial Metrics (Payments)
+  const validPayments = filteredPayments.filter(p => p.status === 'COMPLETED');
+  const totalRevenue = validPayments.reduce((sum, p) => sum + p.total, 0);
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
-  // Revenue by Hour
+  // Revenue by Hour (from Payments)
   const revenueByHour = Array.from({ length: 24 }, (_, i) => {
-    const hourOrders = completedOrders.filter((o) => o.createdAt.getHours() === i);
+    const hourPayments = validPayments.filter((p) => p.processedAt.getHours() === i);
     return {
       hour: `${i}:00`,
-      revenue: hourOrders.reduce((sum, o) => sum + o.total, 0),
-      orders: hourOrders.length,
+      revenue: hourPayments.reduce((sum, p) => sum + p.total, 0),
+      count: hourPayments.length,
     };
-  }).filter((h) => h.revenue > 0 || h.orders > 0);
+  }).filter((h) => h.revenue > 0 || h.count > 0);
 
-  // Revenue by Day
+  // Revenue by Day (from Payments)
   const revenueByDay = (() => {
     const days = dateRange === '30days' ? 30 : dateRange === '7days' ? 7 : 7;
     const data: { date: string; revenue: number; orders: number }[] = [];
@@ -107,12 +165,15 @@ export default function AnalyticsPage() {
       const date = subDays(new Date(), i);
       const dayStart = startOfDay(date);
       const dayEnd = endOfDay(date);
+      const dayPayments = validPayments.filter(
+        (p) => p.processedAt >= dayStart && p.processedAt <= dayEnd
+      );
       const dayOrders = completedOrders.filter(
         (o) => o.createdAt >= dayStart && o.createdAt <= dayEnd
       );
       data.push({
         date: format(date, 'MMM dd'),
-        revenue: dayOrders.reduce((sum, o) => sum + o.total, 0),
+        revenue: dayPayments.reduce((sum, p) => sum + p.total, 0),
         orders: dayOrders.length,
       });
     }
@@ -135,13 +196,13 @@ export default function AnalyticsPage() {
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 10);
 
-  // Payment Methods Distribution
-  const paymentMethodStats = completedOrders.reduce((acc, order) => {
-    const method = order.paymentMethod || 'UNKNOWN';
+  // Payment Methods Distribution (from Payments)
+  const paymentMethodStats = validPayments.reduce((acc, pay) => {
+    const method = pay.paymentMethod || 'UNKNOWN';
     if (!acc[method]) {
       acc[method] = { name: method, value: 0, count: 0 };
     }
-    acc[method].value += order.total;
+    acc[method].value += pay.total;
     acc[method].count += 1;
     return acc;
   }, {} as Record<string, { name: string; value: number; count: number }>);
@@ -218,7 +279,7 @@ export default function AnalyticsPage() {
           <div className="border-2 border-black p-4 text-center">
             <p className="text-xs mb-2">TOTAL ITEMS SOLD</p>
             <p className="text-2xl md:text-3xl font-bold">
-              {completedOrders.reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0)}
+              {totalItemsSold}
             </p>
           </div>
         </div>

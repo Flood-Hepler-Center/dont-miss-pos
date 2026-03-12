@@ -140,6 +140,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </button>
 
             <button
+              onClick={() => router.push('/admin/payments')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/payments' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              PAYMENTS
+            </button>
+
+            <button
+              onClick={() => router.push('/admin/inventory/history')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/inventory/history' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              STOCK HISTORY
+            </button>
+
+            <button
               onClick={() => router.push('/admin/settings/general')}
               className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
                 pathname === '/admin/settings/general' ? 'bg-black text-white' : 'bg-white text-black'

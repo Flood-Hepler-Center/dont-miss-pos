@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import QRCode from 'qrcode';
+import Image from 'next/image';
 
 interface TableItem {
   id: string;
@@ -384,7 +385,14 @@ export default function TablesSettingsPage() {
                 <p className="text-xs mb-4">SCAN TO VIEW MENU AND ORDER</p>
                 {qrCodeUrl && (
                   <div ref={qrRef} className="border-2 border-black p-4 inline-block">
-                    <img src={qrCodeUrl} alt="QR Code" className="w-64 h-64" />
+                    <Image 
+                      src={qrCodeUrl} 
+                      alt="QR Code" 
+                      width={256} 
+                      height={256} 
+                      className="w-64 h-64"
+                      unoptimized
+                    />
                   </div>
                 )}
                 <p className="text-xs text-gray-600 mt-4 break-all">
