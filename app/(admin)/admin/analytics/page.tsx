@@ -233,7 +233,7 @@ export default function AnalyticsPage() {
               <YAxis stroke="#000" style={{ fontSize: '12px' }} />
               <Tooltip
                 contentStyle={{ border: '2px solid black', fontFamily: 'monospace' }}
-                formatter={(value: number) => `฿${value.toFixed(2)}`}
+                formatter={(value) => typeof value === 'number' ? `฿${value.toFixed(2)}` : ''}
               />
               <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: '12px' }} />
               <Line type="monotone" dataKey="revenue" stroke="#000" strokeWidth={2} name="Revenue (฿)" />
@@ -254,7 +254,7 @@ export default function AnalyticsPage() {
                 <YAxis stroke="#000" style={{ fontSize: '10px' }} />
                 <Tooltip
                   contentStyle={{ border: '2px solid black', fontFamily: 'monospace' }}
-                  formatter={(value: number) => `฿${value.toFixed(0)}`}
+                  formatter={(value) => typeof value === 'number' ? `฿${value.toFixed(0)}` : ''}
                 />
                 <Bar dataKey="revenue" fill="#000" name="Revenue" />
               </BarChart>
@@ -271,13 +271,13 @@ export default function AnalyticsPage() {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => `${name} ${percent ? (percent * 100).toFixed(0) : 0}%`}
                   outerRadius={80}
                   fill="#000"
                   dataKey="value"
                   style={{ fontFamily: 'monospace', fontSize: '10px' }}
                 >
-                  {statusData.map((entry, index) => (
+                  {statusData.map((_entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="#000" strokeWidth={2} />
                   ))}
                 </Pie>

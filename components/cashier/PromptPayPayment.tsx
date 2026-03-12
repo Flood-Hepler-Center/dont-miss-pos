@@ -90,7 +90,7 @@ export function PromptPayPayment({ total, table, orders, billCalculation, onComp
         receiptNumber,
         tableId: table.id,
         orderIds,
-        sessionId: table.currentSessionId || '',
+        sessionId: typeof table.currentSession === 'string' ? table.currentSession : (table.currentSession?.sessionId || ''),
         subtotal: billCalculation.subtotal,
         discountAmount: billCalculation.discountAmount,
         discountType: billCalculation.discountType,

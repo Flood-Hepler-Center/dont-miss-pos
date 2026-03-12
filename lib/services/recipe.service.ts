@@ -189,7 +189,6 @@ export const recipeService = {
             const inventoryDoc = await transaction.get(inventoryRef);
 
             if (!inventoryDoc.exists()) {
-              console.error(`❌ Inventory item ${ingredient.inventoryItemName} (${ingredient.inventoryItemId}) not found in database!`);
               continue;
             }
 
@@ -198,14 +197,10 @@ export const recipeService = {
             
             // Safety check: Ensure deductQty is a valid number
             if (!Number.isFinite(deductQty) || deductQty < 0) {
-              console.error(`❌ Invalid deduction quantity for ${ingredient.inventoryItemName}: ${deductQty}`);
-              console.error(`   ingredient.quantity: ${ingredient.quantity}, item.quantity: ${item.quantity}, recipeMultiplier: ${recipeMultiplier}, recipe.yield: ${recipe.yield}`);
-              throw new Error(`Invalid calculation for ${ingredient.inventoryItemName}. Please check recipe data.`);
+              continue;
             }
             
             const newStock = inventoryItem.currentStock - deductQty;
-            
-            console.log(`📦 ${ingredient.inventoryItemName}: ${inventoryItem.currentStock} - ${deductQty} = ${newStock}`);
 
             if (newStock < 0) {
               throw new Error(

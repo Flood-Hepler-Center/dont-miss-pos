@@ -77,14 +77,9 @@ export function TableSelector({ onTableSelect }: TableSelectorProps) {
             <h3 className="text-xl font-bold mb-2">
               TABLE {table.tableNumber}
             </h3>
-            <div className="text-xs mb-2">
+            <div className="text-xs text-gray-600">
               {table.activeOrders?.length || 0} ORDER{(table.activeOrders?.length || 0) !== 1 ? 'S' : ''}
             </div>
-            {table.totalAmount !== undefined && table.totalAmount > 0 && (
-              <div className="text-sm font-bold border-t-2 border-dashed border-black pt-2 mt-2">
-                ฿{table.totalAmount.toFixed(2)}
-              </div>
-            )}
           </button>
         ))}
       </div>

@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { menuService } from '@/lib/services/menu.service';
-import type { Order, MenuItem, OrderItem, SelectedModifier } from '@/types';
-import { X, Plus, Edit2 } from 'lucide-react';
+import type { Order, MenuItem, OrderItem } from '@/types';
+import { X, Plus } from 'lucide-react';
 
 interface EditOrderPageProps {
   params: { orderId: string };
@@ -21,8 +21,6 @@ export default function EditOrderPage({ params }: EditOrderPageProps) {
   const [editedItems, setEditedItems] = useState<OrderItem[]>([]);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
-  const [editingModifiers, setEditingModifiers] = useState<SelectedModifier[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -62,40 +60,6 @@ export default function EditOrderPage({ params }: EditOrderPageProps) {
     const finalPrice = modifierPrice > 0 ? modifierPrice : basePrice + modifierPrice;
     updated[index].subtotal = finalPrice * newQuantity;
     setEditedItems(updated);
-  };
-
-  const handleEditModifiers = (index: number) => {
-    setEditingItemIndex(index);
-    setEditingModifiers([...(editedItems[index].modifiers || [])]);
-  };
-
-  const handleSaveModifiers = () => {
-    if (editingItemIndex === null) return;
-    
-    const updated = [...editedItems];
-    updated[editingItemIndex].modifiers = editingModifiers;
-    
-    // Recalculate subtotal with new modifiers
-    const basePrice = updated[editingItemIndex].price;
-    let finalPrice = basePrice;
-    
-    for (const mod of editingModifiers) {
-      if (mod.priceMode === 'absolute' && mod.absolutePrice) {
-        finalPrice = mod.absolutePrice;
-        break;
-      } else {
-        finalPrice += mod.priceAdjustment;
-      }
-    }
-    
-    updated[editingItemIndex].subtotal = finalPrice * updated[editingItemIndex].quantity;
-    setEditedItems(updated);
-    setEditingItemIndex(null);
-    setEditingModifiers([]);
-  };
-
-  const handleRemoveModifier = (modIndex: number) => {
-    setEditingModifiers(editingModifiers.filter((_, i) => i !== modIndex));
   };
 
   const handleRemoveItem = (index: number) => {
@@ -213,14 +177,6 @@ export default function EditOrderPage({ params }: EditOrderPageProps) {
                         </div>
                       )}
                     </div>
-                    
-                    <button
-                      onClick={() => handleEditModifiers(index)}
-                      className="p-2 border-2 border-black hover:bg-gray-100"
-                      title="Edit modifiers"
-                    >
-                      <Edit2 size={16} />
-                    </button>
                     
                     <div className="flex items-center gap-2">
                       <button

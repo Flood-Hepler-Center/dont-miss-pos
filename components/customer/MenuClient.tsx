@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCartStore } from '@/lib/stores/cartStore';
 import { ShoppingCart, Eye } from 'lucide-react';
 import Image from 'next/image';
-import type { MenuCategory, MenuItem } from '@/types';
+import type { MenuCategory, MenuItem, SelectedModifier } from '@/types';
 import { ItemModifierModal } from './ItemModifierModal';
 
 interface MenuClientProps {
@@ -46,7 +46,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
     }
   };
 
-  const handleAddWithModifiers = (item: MenuItem, quantity: number, modifiers: Array<{ groupId: string; optionId: string; optionName: string; priceAdjustment: number }>) => {
+  const handleAddWithModifiers = (item: MenuItem, quantity: number, modifiers: SelectedModifier[]) => {
     addItem(item, quantity, modifiers);
     setAddedItemId(item.id);
     setTimeout(() => setAddedItemId(null), 600);
