@@ -1,0 +1,86 @@
+/**
+ * Inventory & Stock Movement Types
+ * Source: BA Data Model - dm-menu-inventory.md
+ */
+
+export type InventoryCategory =
+  | 'PROTEINS'
+  | 'VEGETABLES'
+  | 'DRY_GOODS'
+  | 'BEVERAGES'
+  | 'CONDIMENTS'
+  | 'OTHER';
+
+export type MovementType =
+  | 'DEDUCTION'
+  | 'ADDITION'
+  | 'ADJUSTMENT'
+  | 'VOID_REVERSAL';
+
+export type AlertSeverity = 'WARNING' | 'CRITICAL';
+
+/** Inventory item (ingredient/supply) */
+export type InventoryItem = {
+  id: string;
+  name: string;
+  category: InventoryCategory;
+  unit: string;
+  currentStock: number;
+  initialStock: number;
+  reorderPoint: number;
+  unitCost: number;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  lastRestockedAt?: Date;
+};
+
+/** Stock movement record for audit trail */
+export type StockMovement = {
+  id: string;
+  inventoryItemId: string;
+  inventoryItemName: string;
+  type: MovementType;
+  quantity: number;
+  reason: string;
+  relatedOrderId?: string;
+  performedBy: string;
+  timestamp: Date;
+  previousStock: number;
+  newStock: number;
+};
+
+/** Low stock alert */
+export type LowStockAlert = {
+  id: string;
+  inventoryItemId: string;
+  inventoryItemName: string;
+  currentStock: number;
+  reorderPoint: number;
+  percentRemaining: number;
+  severity: AlertSeverity;
+  isAcknowledged: boolean;
+  acknowledgedBy?: string;
+  acknowledgedAt?: Date;
+  triggeredAt: Date;
+  clearedAt?: Date;
+};
+
+/** Input for stock adjustment */
+export type StockAdjustmentInput = {
+  type: 'ADDITION' | 'DEDUCTION' | 'SET_EXACT';
+  quantity: number;
+  reason: string;
+  notes?: string;
+  performedBy: string;
+};
+
+/** Input for creating an inventory item */
+export type CreateInventoryItemInput = {
+  name: string;
+  category: InventoryCategory;
+  unit: string;
+  initialStock: number;
+  reorderPoint: number;
+  unitCost: number;
+};

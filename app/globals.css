@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --paper-cream: #FAFAF8;
+  --paper-lines: #E8DCC8;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-patrick-hand), 'Patrick Hand', cursive;
+}
+
+/* Prevent FOUC */
+.admin-page {
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Optimize gradient rendering */
+@layer utilities {
+  .gradient-text {
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  @keyframes slideInUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-slide-in-up {
+    animation: slideInUp 0.3s ease-out both;
+  }
+}
