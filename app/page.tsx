@@ -1,42 +1,33 @@
-import Link from 'next/link';
-
 export default function Home() {
   return (
-    <div className="min-h-screen bg-paper-cream flex flex-col items-center justify-center p-8">
-      <h1 className="text-4xl font-bold text-ink-black mb-2 font-[family-name:var(--font-patrick-hand)]">
-        Don&apos;t Miss This Saturday
-      </h1>
-      <p className="text-lg text-gray-600 mb-8 font-[family-name:var(--font-quicksand)]">
-        POS Platform
-      </p>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl w-full">
-        <Link
-          href="/menu/1"
-          className="bg-white rounded-xl p-6 border-2 border-ink-black shadow-sketch hover:shadow-sketch-lg transition-all hover:-translate-y-1 text-center"
-        >
-          <span className="text-3xl mb-2 block">🍜</span>
-          <h2 className="text-lg font-semibold text-ink-black">Customer Menu</h2>
-          <p className="text-sm text-gray-500 mt-1">QR Menu for Table 1</p>
-        </Link>
-
-        <Link
-          href="/login"
-          className="bg-white rounded-xl p-6 border border-gray-200 shadow-soft-sm hover:shadow-soft-md transition-all hover:-translate-y-1 text-center"
-        >
-          <span className="text-3xl mb-2 block">👨‍💼</span>
-          <h2 className="text-lg font-semibold text-gray-800">Staff Portal</h2>
-          <p className="text-sm text-gray-500 mt-1">Dashboard &amp; Orders</p>
-        </Link>
-
-        <Link
-          href="/admin/dashboard"
-          className="bg-white rounded-xl p-6 border border-gray-200 shadow-soft-sm hover:shadow-soft-md transition-all hover:-translate-y-1 text-center"
-        >
-          <span className="text-3xl mb-2 block">⚙️</span>
-          <h2 className="text-lg font-semibold text-gray-800">Admin Panel</h2>
-          <p className="text-sm text-gray-500 mt-1">Menu &amp; Reports</p>
-        </Link>
+    <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8 font-mono">
+      <div className="max-w-md w-full border-2 border-black p-8 text-center space-y-4">
+        <div className="text-sm tracking-widest">
+          ══════════════════════════
+        </div>
+        <div className="py-4">
+          <h1 className="text-4xl font-bold tracking-[0.2em] mb-2">
+            don&apos;t miss this saturday
+          </h1>
+          <p className="text-xs uppercase tracking-widest text-gray-500">
+            SYSTEM ENGINE v1.0
+          </p>
+        </div>
+        <div className="text-sm tracking-widest">
+          ══════════════════════════
+        </div>
+        <div className="pt-4 grid grid-cols-1 gap-4">
+          <a 
+            href="/login" 
+            className="border-2 border-black p-4 hover:bg-black hover:text-white transition-colors font-bold uppercase"
+          >
+            [ OPEN ACCESS ]
+          </a>
+        </div>
+        <div className="text-[10px] text-gray-400 font-mono mt-8">
+          TIMESTAMP: {new Date().toISOString().split('T')[0]}<br />
+          LOC: {new Date().toLocaleTimeString()}
+        </div>
       </div>
     </div>
   );
