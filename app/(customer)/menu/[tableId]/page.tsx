@@ -19,7 +19,7 @@ export default async function MenuPage({
   const tableDoc = await getDoc(doc(db, 'tables', params.tableId));
   if (!tableDoc.exists() || !tableDoc.data()?.isActive) {
     return (
-      <div className="min-h-screen bg-white font-mono flex items-center justify-center p-6">
+      <div className="min-h-screen bg-white font-sour-gummy flex items-center justify-center p-6">
         <div className="max-w-md w-full border-2 border-black p-6 text-center">
           <div className="text-xl mb-4">════════</div>
           <h1 className="text-2xl font-bold mb-4">TABLE NOT AVAILABLE</h1>

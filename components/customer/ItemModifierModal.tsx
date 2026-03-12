@@ -130,7 +130,7 @@ export function ItemModifierModal({ item, onClose, onAddToCart }: ItemModifierMo
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
-      <div className="bg-white border-t-4 md:border-2 border-black w-full md:max-w-lg max-h-[90vh] overflow-y-auto font-mono">
+      <div className="bg-white border-t-4 md:border-2 border-black w-full md:max-w-lg max-h-[90vh] overflow-y-auto font-sour-gummy">
         {/* Header */}
         <div className="sticky top-0 bg-white border-b-2 border-black p-4 z-10">
           <div className="flex justify-between items-start">

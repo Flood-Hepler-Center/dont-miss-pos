@@ -70,7 +70,7 @@ export function OrderTracking({ orderId }: OrderTrackingProps) {
 
   if (loading || !order) {
     return (
-      <div className="min-h-screen bg-white font-mono flex items-center justify-center p-6">
+      <div className="min-h-screen bg-white font-sour-gummy flex items-center justify-center p-6">
         <div className="border-2 border-black p-8">
           <div className="text-center">
             <div className="text-sm mb-2">═</div>
@@ -85,7 +85,7 @@ export function OrderTracking({ orderId }: OrderTrackingProps) {
   const currentStatusIndex = statusOrder.indexOf(order.status);
 
   return (
-    <div className="min-h-screen bg-white font-mono p-4">
+    <div className="min-h-screen bg-white font-sour-gummy p-4">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="border-2 border-black p-4 mb-6">

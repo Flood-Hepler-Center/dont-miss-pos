@@ -59,7 +59,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
   const cartCount = getItemCount();
 
   return (
-    <div className="min-h-screen bg-white pb-24 font-mono">
+    <div className="min-h-screen bg-white pb-24 font-sour-gummy">
       {/* Receipt Header */}
       <div className="sticky top-0 z-20 bg-white border-b-2 border-black px-4 py-4">
         <div className="max-w-2xl mx-auto">

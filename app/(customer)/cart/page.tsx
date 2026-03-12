@@ -25,7 +25,7 @@ export default function CartPage() {
 
   // Loading overlay component
   const LoadingOverlay = () => (
-    <div className="fixed inset-0 bg-white/95 z-50 flex items-center justify-center font-mono">
+    <div className="fixed inset-0 bg-white/95 z-50 flex items-center justify-center font-sour-gummy">
       <div className="border-2 border-black p-12 bg-white">
         <div className="text-center">
           <div className="text-xl mb-3">═════</div>
@@ -79,7 +79,7 @@ export default function CartPage() {
 
   if (items.length === 0) {
     return (
-      <div className="min-h-screen bg-white font-mono flex flex-col items-center justify-center p-6">
+      <div className="min-h-screen bg-white font-sour-gummy flex flex-col items-center justify-center p-6">
         <div className="text-center max-w-md">
           <div className="text-xl mb-4"></div>
           <h1 className="text-2xl font-bold mb-2">CART IS EMPTY</h1>
@@ -101,7 +101,7 @@ export default function CartPage() {
   return (
     <>
       {isSubmitting && <LoadingOverlay />}
-      <div className="min-h-screen bg-white pb-24 font-mono">
+      <div className="min-h-screen bg-white pb-24 font-sour-gummy">
         <div className="max-w-2xl mx-auto">
           {/* Receipt Header */}
           <div className="sticky top-0 z-10 bg-white border-b-2 border-black px-4 py-4">

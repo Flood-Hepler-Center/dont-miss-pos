@@ -28,6 +28,8 @@ const patrickHand = Patrick_Hand({
   preload: true,
 });
 
+// Sour Gummy is imported in globals.css
+
 export const metadata: Metadata = {
   title: "Don't Miss This Saturday - POS",
   description: 'Point of Sale Platform for Don\'t Miss This Saturday restaurant',

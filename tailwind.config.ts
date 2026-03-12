@@ -35,6 +35,7 @@ const config: Config = {
         body: ["Quicksand", "sans-serif"],
         price: ["Nunito", "sans-serif"],
         inter: ["Inter", "sans-serif"],
+        "sour-gummy": ["var(--font-sour-gummy)", "cursive"],
       },
       boxShadow: {
         sketch: "4px 4px 0px rgba(45, 45, 45, 0.08)",
