@@ -43,18 +43,17 @@ export default function CartPage() {
       return;
     }
 
-    if (!tableId || !sessionId) {
-      setError('Session expired. Please scan QR code again.');
-      return;
-    }
+    // Note: tableId and sessionId are now optional - allows pre-seated ordering
+    // Customer can order without scanning table QR first
 
     setIsSubmitting(true);
     setError(null);
 
     try {
       const orderInput: CreateOrderInput = {
-        tableId,
-        sessionId,
+        orderType: 'DINE_IN',
+        tableId: tableId || null,  // Allow null for pre-seated ordering
+        sessionId: sessionId || null,  // Allow null session
         items: items.map((item) => ({
           menuItemId: item.menuItemId,
           name: item.name,
@@ -108,7 +107,7 @@ export default function CartPage() {
             <div className="text-center">
               <div className="text-sm">════════════</div>
               <h1 className="text-2xl font-bold my-2">DON&apos;T MISS THIS SATURDAY</h1>
-              <p className="text-xs">ORDER REVIEW - TABLE #{tableId}</p>
+              <p className="text-xs">ORDER REVIEW{tableId ? ` - TABLE #${tableId}` : ' - NO TABLE ASSIGNED'}</p>
               <div className="text-sm">════════════</div>
             </div>
           </div>
@@ -202,16 +201,16 @@ export default function CartPage() {
           <div className="max-w-2xl mx-auto grid grid-cols-2 gap-3">
             <button
               onClick={() => router.back()}
-              className="px-6 py-3 border-2 border-black bg-white text-black font-bold text-sm hover:bg-gray-100 transition-colors"
+              className="px-4 py-3 border-2 border-black bg-white text-black font-bold text-xs sm:text-sm hover:bg-gray-100 transition-colors"
             >
               [BACK]
             </button>
             <button
               onClick={handleSubmitOrder}
               disabled={isSubmitting}
-              className="px-6 py-3 border-2 border-black bg-black text-white font-bold text-sm hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-3 border-2 border-black bg-black text-white font-bold text-xs sm:text-sm hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? '[PLACING ORDER...]' : '[CONFIRM ORDER]'}
+              {isSubmitting ? '[PLACING...]' : '[CONFIRM]'}
             </button>
           </div>
         </div>

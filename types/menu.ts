@@ -33,6 +33,10 @@ export type MenuItem = {
   displayOrder: number;
   isPopular?: boolean;
   tags?: string[];
+  prepStation?: 'HOT_KITCHEN' | 'COLD_KITCHEN' | 'DRINK' | 'DESSERT' | 'GENERAL';
+  targetPrepMinutes?: number;
+  batchCookable?: boolean;
+  cookPriority?: number;
   modifiers?: ModifierGroup[];
   recipe?: RecipeIngredient[];
   salesCount?: number;

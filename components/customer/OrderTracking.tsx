@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { Order, OrderStatus, OrderItem, SelectedModifier } from '@/types';
@@ -49,6 +50,7 @@ const statusConfig: Record<OrderStatus, {
 const statusOrder: OrderStatus[] = ['PLACED', 'PREPARING', 'READY', 'SERVED'];
 
 export function OrderTracking({ orderId }: OrderTrackingProps) {
+  const router = useRouter();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -95,7 +97,7 @@ export function OrderTracking({ orderId }: OrderTrackingProps) {
             <div className="text-sm"></div>
           </div>
           <div className="mt-4 text-center text-xs">
-            <div>ORDER #{order.id.slice(-8).toUpperCase()}</div>
+            <div>ORDER #{order.orderNumber || order.id.slice(-6).toUpperCase()}</div>
             <div>TABLE {order.tableId}</div>
           </div>
         </div>
@@ -180,6 +182,16 @@ export function OrderTracking({ orderId }: OrderTrackingProps) {
               <span>฿{order.total.toFixed(2)}</span>
             </div>
           </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="mt-6">
+          <button
+            onClick={() => router.push(`/menu/${order.tableId}`)}
+            className="w-full bg-black text-white p-4 font-bold border-2 border-black hover:bg-gray-800 transition-all text-sm shadow-md flex items-center justify-center gap-2"
+          >
+            ^ ORDER MORE
+          </button>
         </div>
       </div>
     </div>

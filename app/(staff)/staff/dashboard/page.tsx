@@ -4,13 +4,17 @@ import { useEffect, useState } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { Order } from '@/types';
+import { OrderTypeBadge } from '@/components/orders/OrderTypeBadge';
+import { useRouter } from 'next/navigation';
 
 export default function StaffDashboardPage() {
+  const router = useRouter();
   const [stats, setStats] = useState({
     activeOrders: 0,
     occupiedTables: 0,
     todayRevenue: 0,
     avgPrepTime: 0,
+    pendingTakeAways: 0,
   });
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
 
@@ -26,9 +30,13 @@ export default function StaffDashboardPage() {
         ...doc.data(),
       })) as Order[];
 
+      // Count take-away orders
+      const takeAwayOrders = orders.filter(o => o.orderType === 'TAKE_AWAY');
+
       setStats((prev) => ({
         ...prev,
         activeOrders: orders.length,
+        pendingTakeAways: takeAwayOrders.length,
       }));
 
       setRecentOrders(orders.slice(0, 10));
@@ -130,7 +138,7 @@ export default function StaffDashboardPage() {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
           {/* Active Orders */}
           <div className="border-2 border-black p-4">
             <div className="text-center">
@@ -145,6 +153,14 @@ export default function StaffDashboardPage() {
               <p className="text-xs mb-2">OCCUPIED TABLES</p>
               <p className="text-4xl font-bold">{stats.occupiedTables}</p>
               <p className="text-xs text-gray-600">/ 20</p>
+            </div>
+          </div>
+
+          {/* Pending Take-Aways */}
+          <div className="border-2 border-blue-600 p-4 bg-blue-50">
+            <div className="text-center">
+              <p className="text-xs mb-2 text-blue-800">PENDING TAKE-AWAYS</p>
+              <p className="text-4xl font-bold text-blue-800">{stats.pendingTakeAways}</p>
             </div>
           </div>
 
@@ -166,6 +182,28 @@ export default function StaffDashboardPage() {
           </div>
         </div>
 
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <button
+            onClick={() => router.push('/staff/orders/create')}
+            className="p-4 border-2 border-black bg-black text-white font-bold hover:bg-gray-800 transition-colors"
+          >
+            [ + NEW ORDER ]
+          </button>
+          <button
+            onClick={() => router.push('/staff/kds')}
+            className="p-4 border-2 border-black font-bold hover:bg-gray-100 transition-colors"
+          >
+            [ KITCHEN DISPLAY ]
+          </button>
+          <button
+            onClick={() => router.push('/staff/cashier')}
+            className="p-4 border-2 border-blue-600 bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors"
+          >
+            [ CASHIER ]
+          </button>
+        </div>
+
         {/* Recent Orders */}
         <div className="border-2 border-black">
           <div className="border-b-2 border-black p-3 bg-white">
@@ -177,8 +215,14 @@ export default function StaffDashboardPage() {
               recentOrders.map((order) => (
                 <div key={order.id} className="p-4">
                   <div className="flex justify-between items-center text-sm">
-                    <div className="flex gap-4">
-                      <span className="font-bold">TABLE #{order.tableId}</span>
+                    <div className="flex gap-4 items-center">
+                      <OrderTypeBadge orderType={order.orderType || 'DINE_IN'} />
+                      <span className="font-bold">
+                        {order.orderType === 'TAKE_AWAY' 
+                          ? (order.customerName?.toUpperCase() || 'TAKE-AWAY')
+                          : `TABLE #${order.tableId || '-'}`
+                        }
+                      </span>
                       <span>{order.items?.length || 0} ITEMS</span>
                     </div>
                     <div className="flex gap-4 items-center">

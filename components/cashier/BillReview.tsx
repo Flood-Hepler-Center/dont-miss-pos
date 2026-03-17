@@ -17,7 +17,7 @@ interface BillCalculation {
 }
 
 interface BillReviewProps {
-  table: Table;
+  table: Table | null;
   orders: Order[];
   onComplete: (calculation: BillCalculation) => void;
   onBack: () => void;
@@ -119,7 +119,7 @@ export function BillReview({ table, orders, onComplete, onBack }: BillReviewProp
       <div className="border-2 border-black mb-6">
         <div className="border-b-2 border-black p-4 text-center">
           <div className="text-sm">═══════</div>
-          <h2 className="text-xl font-bold my-1">TABLE {table.tableNumber} BILL</h2>
+          <h2 className="text-xl font-bold my-1">{table ? `TABLE ${table.tableNumber} BILL` : 'NO-TABLE ORDER BILL'}</h2>
           <div className="text-sm">═══════</div>
         </div>
 
@@ -132,7 +132,7 @@ export function BillReview({ table, orders, onComplete, onBack }: BillReviewProp
                 className="w-full p-4 hover:bg-gray-50 flex justify-between items-center"
               >
                 <span className="font-bold text-sm">
-                  ORDER #{order.id.slice(-6).toUpperCase()}
+                  ORDER #{order.orderNumber || order.id.slice(-6).toUpperCase()}
                 </span>
                 <div className="flex items-center gap-3">
                   <span className="text-xs">{order.items?.length || 0} ITEMS</span>

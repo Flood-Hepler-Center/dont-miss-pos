@@ -12,15 +12,16 @@ interface TableSelectorProps {
 
 export function TableSelector({ onTableSelect }: TableSelectorProps) {
   const [tables, setTables] = useState<Table[]>([]);
+  const [tableOrders, setTableOrders] = useState<Map<string, Order[]>>(new Map());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(
+    const tablesQuery = query(
       collection(db, 'tables'),
       where('status', 'in', ['OCCUPIED', 'READY_TO_PAY'])
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeTables = onSnapshot(tablesQuery, (snapshot) => {
       const tablesData = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
@@ -29,19 +30,40 @@ export function TableSelector({ onTableSelect }: TableSelectorProps) {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeTables();
+    };
   }, []);
 
-  const handleTableClick = async (table: Table) => {
-    if (!table.activeOrders || table.activeOrders.length === 0) {
+  useEffect(() => {
+    const unsubscribers: (() => void)[] = [];
+
+    tables.forEach((table) => {
+      const unsubscribe = orderService.subscribeToTableOrders(table.id, (orders) => {
+        setTableOrders((prev) => {
+          const next = new Map(prev);
+          if (orders.length > 0) {
+            next.set(table.id, orders);
+          } else {
+            next.delete(table.id);
+          }
+          return next;
+        });
+      });
+      unsubscribers.push(unsubscribe);
+    });
+
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+    };
+  }, [tables]);
+
+  const handleTableClick = (table: Table) => {
+    const orders = tableOrders.get(table.id) || [];
+    if (orders.length === 0) {
       return;
     }
-
-    const orders = await Promise.all(
-      table.activeOrders.map((orderId) => orderService.getById(orderId))
-    );
-    const validOrders = orders.filter((order): order is Order => order !== null);
-    onTableSelect(table, validOrders);
+    onTableSelect(table, orders);
   };
 
   if (loading) {
@@ -68,20 +90,25 @@ export function TableSelector({ onTableSelect }: TableSelectorProps) {
         <p className="text-xs text-center font-bold">[ SELECT TABLE TO PROCESS PAYMENT ]</p>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-        {tables.map((table) => (
-          <button
-            key={table.id}
-            onClick={() => handleTableClick(table)}
-            className="border-2 border-black p-4 hover:bg-gray-100 cursor-pointer transition-colors text-center"
-          >
-            <h3 className="text-xl font-bold mb-2">
-              TABLE {table.tableNumber}
-            </h3>
-            <div className="text-xs text-gray-600">
-              {table.activeOrders?.length || 0} ORDER{(table.activeOrders?.length || 0) !== 1 ? 'S' : ''}
-            </div>
-          </button>
-        ))}
+        {tables.map((table) => {
+          const orders = tableOrders.get(table.id) || [];
+          const orderCount = orders.length;
+          
+          return (
+            <button
+              key={table.id}
+              onClick={() => handleTableClick(table)}
+              className="border-2 border-black p-4 hover:bg-gray-100 cursor-pointer transition-colors text-center"
+            >
+              <h3 className="text-xl font-bold mb-2">
+                TABLE {table.tableNumber}
+              </h3>
+              <div className="text-xs text-gray-600">
+                {orderCount} ORDER{orderCount !== 1 ? 'S' : ''}
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

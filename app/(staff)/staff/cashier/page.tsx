@@ -1,12 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { onSnapshot, doc } from 'firebase/firestore';
+import { db } from '@/lib/firebase/config';
 import { TableSelector } from '@/components/cashier/TableSelector';
+import { NoTableOrderSelector } from '@/components/cashier/NoTableOrderSelector';
 import { BillReview } from '@/components/cashier/BillReview';
 import { PaymentMethodSelector } from '@/components/cashier/PaymentMethodSelector';
 import { CashPayment } from '@/components/cashier/CashPayment';
 import { PromptPayPayment } from '@/components/cashier/PromptPayPayment';
 import { Receipt } from '@/components/cashier/Receipt';
+import { orderService } from '@/lib/services/order.service';
 import type { Table, Order, Payment } from '@/types';
 
 type CashierStep = 'select' | 'review' | 'payment' | 'complete';
@@ -42,6 +46,12 @@ export default function CashierPage() {
     setStep('payment');
   };
 
+  const handleNoTableOrdersSelect = (selectedOrders: Order[]) => {
+    setSelectedTable(null); // No table selected
+    setOrders(selectedOrders);
+    setStep('review');
+  };
+
   const handlePaymentMethodSelect = (method: PaymentMethod) => {
     setPaymentMethod(method);
   };
@@ -59,6 +69,36 @@ export default function CashierPage() {
     setPaymentMethod(null);
     setPaymentData(null);
   };
+
+  // Real-time sync: refresh table/orders when changes occur from other pages
+  useEffect(() => {
+    if (!selectedTable) return;
+
+    const unsubscribeTable = onSnapshot(
+      doc(db, 'tables', selectedTable.id),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const updatedTable = { id: docSnap.id, ...docSnap.data() } as Table;
+          setSelectedTable(updatedTable);
+        }
+      },
+      (error) => {
+        console.error('Error syncing table:', error);
+      }
+    );
+
+    const unsubscribeOrders = orderService.subscribeToTableOrders(
+      selectedTable.id,
+      (updatedOrders) => {
+        setOrders(updatedOrders);
+      }
+    );
+
+    return () => {
+      unsubscribeTable();
+      unsubscribeOrders();
+    };
+  }, [selectedTable?.id]);
 
   const currentStepIndex = {
     select: 0,
@@ -105,10 +145,14 @@ export default function CashierPage() {
 
         {/* Content */}
         {step === 'select' && (
-          <TableSelector onTableSelect={handleTableSelect} />
+          <div className="space-y-6">
+            <TableSelector onTableSelect={handleTableSelect} />
+            <div className="border-t-2 border-gray-300 my-6" />
+            <NoTableOrderSelector onOrderSelect={handleNoTableOrdersSelect} />
+          </div>
         )}
 
-        {step === 'review' && selectedTable && (
+        {step === 'review' && (
           <BillReview
             table={selectedTable}
             orders={orders}
@@ -117,7 +161,7 @@ export default function CashierPage() {
           />
         )}
 
-        {step === 'payment' && billCalculation && selectedTable && (
+        {step === 'payment' && billCalculation && (
           <div className="space-y-6">
             {!paymentMethod ? (
               <PaymentMethodSelector onSelect={handlePaymentMethodSelect} />
@@ -144,10 +188,17 @@ export default function CashierPage() {
         )}
 
         {step === 'complete' && paymentData && (
-          <Receipt
-            payment={paymentData}
-            onNewTransaction={handleNewTransaction}
-          />
+          <div className="space-y-6 pb-12">
+            <Receipt payment={paymentData} orders={orders} />
+            <div className="flex justify-center mt-6">
+              <button 
+                onClick={handleNewTransaction}
+                className="bg-black text-white px-8 py-4 font-bold border-2 border-black hover:bg-gray-800 hover:text-white transition-all shadow-md"
+              >
+                START NEW TRANSACTION
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -102,25 +102,23 @@ export const paymentService = {
     }
   },
 
-  async getNextReceiptNumber(): Promise<string> {
+  async generateReceiptNumber(): Promise<string> {
     try {
       const today = new Date();
       const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
+      const seqRef = doc(db, 'receiptSequences', dateStr);
 
-      const q = query(
-        collection(db, 'receiptSequences'),
-        where('date', '==', dateStr),
-        limit(1)
-      );
-      const snapshot = await getDocs(q);
-
-      let sequence = 1;
-      if (!snapshot.empty) {
-        const seqDoc = snapshot.docs[0];
-        sequence = (seqDoc.data().lastSequence || 0) + 1;
-      }
-
-      return `R${dateStr}-${sequence.toString().padStart(4, '0')}`;
+      return await runTransaction(db, async (transaction) => {
+        const seqSnap = await transaction.get(seqRef);
+        let newSequence = 1;
+        if (seqSnap.exists()) {
+          newSequence = (seqSnap.data().lastSequence || 0) + 1;
+          transaction.update(seqRef, { lastSequence: newSequence, updatedAt: serverTimestamp() });
+        } else {
+          transaction.set(seqRef, { date: dateStr, lastSequence: newSequence, updatedAt: serverTimestamp() });
+        }
+        return `REC-${dateStr}-${newSequence.toString().padStart(3, '0')}`;
+      });
     } catch (error) {
       console.error('Error generating receipt number:', error);
       throw new Error('Failed to generate receipt number');
@@ -129,19 +127,7 @@ export const paymentService = {
 
   async processPayment(paymentData: ProcessPaymentInput): Promise<string> {
     try {
-      // Get receipt number BEFORE transaction (cannot use getDocs inside transaction)
-      const receiptNumber = await this.getNextReceiptNumber();
-      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-
-      // Get current sequence BEFORE transaction
-      const seqQuery = query(
-        collection(db, 'receiptSequences'),
-        where('date', '==', today),
-        limit(1)
-      );
-      const seqSnapshot = await getDocs(seqQuery);
-      const currentSequence = seqSnapshot.empty ? 0 : (seqSnapshot.docs[0].data().lastSequence || 0);
-      const seqDocId = seqSnapshot.empty ? null : seqSnapshot.docs[0].id;
+      const receiptNumber = paymentData.receiptNumber || await this.generateReceiptNumber();
 
       return await runTransaction(db, async (transaction) => {
         const paymentRef = doc(collection(db, 'payments'));
@@ -194,22 +180,6 @@ export const paymentService = {
           currentSessionId: null,
           updatedAt: serverTimestamp(),
         });
-
-        // Update sequence using pre-fetched data
-        if (seqDocId === null) {
-          const seqRef = doc(collection(db, 'receiptSequences'));
-          transaction.set(seqRef, {
-            date: today,
-            lastSequence: 1,
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          const seqRef = doc(db, 'receiptSequences', seqDocId);
-          transaction.update(seqRef, {
-            lastSequence: currentSequence + 1,
-            updatedAt: serverTimestamp(),
-          });
-        }
 
         const receiptRef = doc(collection(db, 'receipts'));
         transaction.set(receiptRef, {

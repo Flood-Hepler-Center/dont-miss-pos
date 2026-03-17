@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp, runTransaction, arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { menuService } from '@/lib/services/menu.service';
+import { useAuthStore } from '@/lib/stores/authStore';
 import type { Order, MenuItem, OrderItem, SelectedModifier } from '@/types';
 import { X, Plus, Edit2 } from 'lucide-react';
+import { OrderTypeBadge } from '@/components/orders/OrderTypeBadge';
 import { ItemModifierModal } from '@/components/shared/ItemModifierModal';
+import { message } from 'antd';
 
 interface EditOrderPageProps {
   params: { orderId: string };
@@ -20,6 +23,7 @@ export default function EditOrderPage({ params }: EditOrderPageProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editedItems, setEditedItems] = useState<OrderItem[]>([]);
+  const [editedTableId, setEditedTableId] = useState<string>('');
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
@@ -34,6 +38,7 @@ export default function EditOrderPage({ params }: EditOrderPageProps) {
           const orderData = { id: orderDoc.id, ...orderDoc.data() } as Order;
           setOrder(orderData);
           setEditedItems([...orderData.items]);
+          setEditedTableId(orderData.tableId || '');  // Initialize tableId
         }
         
         const items = await menuService.getActiveItems();
@@ -118,6 +123,95 @@ export default function EditOrderPage({ params }: EditOrderPageProps) {
   const handleRemoveItem = (index: number) => {
     const updated = editedItems.filter((_, i) => i !== index);
     setEditedItems(updated);
+  };
+
+  const handleSaveTable = async () => {
+    if (!order) return;
+
+    const staffId = useAuthStore.getState().staffId;
+
+    try {
+      const previousTableId = order.tableId || null;
+      const nextTableId = editedTableId || null;
+      const tableChanged = previousTableId !== nextTableId;
+
+      await runTransaction(db, async (transaction) => {
+        // PHASE 1: ALL READS FIRST (Firebase requirement)
+        let prevTableSnap = null;
+        let nextTableSnap = null;
+
+        if (tableChanged && previousTableId) {
+          const previousTableRef = doc(db, 'tables', previousTableId);
+          prevTableSnap = await transaction.get(previousTableRef);
+        }
+
+        if (tableChanged && nextTableId) {
+          const nextTableRef = doc(db, 'tables', nextTableId);
+          nextTableSnap = await transaction.get(nextTableRef);
+        }
+
+        // PHASE 2: ALL WRITES AFTER READS
+        const orderRef = doc(db, 'orders', params.orderId);
+        const updateData: Record<string, unknown> = {
+          tableId: nextTableId,
+          updatedAt: serverTimestamp(),
+        };
+
+        if (tableChanged) {
+          updateData.tableAssignedAt = serverTimestamp();
+          updateData.tableAssignedBy = staffId;
+        }
+
+        transaction.update(orderRef, updateData);
+
+        if (!tableChanged) {
+          return;
+        }
+
+        // Update previous table
+        if (previousTableId && prevTableSnap?.exists()) {
+          const previousTableRef = doc(db, 'tables', previousTableId);
+          const prevTableData = prevTableSnap.data();
+          const currentActiveOrders = (prevTableData.activeOrders || []) as string[];
+          const updatedActiveOrders = currentActiveOrders.filter(id => id !== params.orderId);
+          
+          transaction.update(previousTableRef, {
+            activeOrders: updatedActiveOrders,
+            status: updatedActiveOrders.length === 0 ? 'AVAILABLE' : prevTableData.status,
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        // Update next table
+        if (nextTableId) {
+          const nextTableRef = doc(db, 'tables', nextTableId);
+          
+          if (nextTableSnap?.exists()) {
+            transaction.update(nextTableRef, {
+              activeOrders: arrayUnion(params.orderId),
+              status: 'OCCUPIED',
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            transaction.set(nextTableRef, {
+              id: nextTableId,
+              tableNumber: nextTableId,
+              status: 'OCCUPIED',
+              activeOrders: [params.orderId],
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+      });
+
+      // Update local state
+      setOrder({ ...order, tableId: nextTableId });
+      message.success('Table assignment updated successfully');
+    } catch (error) {
+      console.error('Error updating table:', error);
+      message.error('Failed to update table assignment');
+    }
   };
 
   const handleAddItem = (menuItem: MenuItem) => {
@@ -227,12 +321,64 @@ export default function EditOrderPage({ params }: EditOrderPageProps) {
           <div className="text-sm">═══════════</div>
           <h1 className="text-xl font-bold my-1">EDIT ORDER</h1>
           <div className="text-sm">═══════════</div>
-          <div className="mt-3 text-xs">
-            <div>ORDER #{order.id.slice(-8).toUpperCase()}</div>
-            <div>TABLE {order.tableId}</div>
-            <div>STATUS: {order.status}</div>
+          <div className="mt-3 text-xs space-y-1">
+            <div>ORDER #{order.orderNumber || order.id.slice(-8).toUpperCase()}</div>
+            <div className="flex justify-center gap-2">
+              <OrderTypeBadge orderType={order.orderType || 'DINE_IN'} />
+              <span>• {order.status}</span>
+            </div>
+            <div>
+              {order.orderType === 'TAKE_AWAY' 
+                ? (order.customerName || 'Unknown')
+                : `TABLE ${order.tableId || '-'}`
+              }
+            </div>
           </div>
         </div>
+
+        {/* Table Assignment Editor (DINE_IN only) */}
+        {order.orderType === 'DINE_IN' && (
+          <div className="border-2 border-amber-400 bg-amber-50 p-4 mb-6">
+            <h2 className="text-xs font-bold text-amber-800 mb-3">[ TABLE ASSIGNMENT ]</h2>
+            <div className="flex items-center gap-3">
+              <select
+                value={editedTableId}
+                onChange={(e) => setEditedTableId(e.target.value)}
+                className="flex-1 px-4 py-2 border-2 border-black text-sm focus:outline-none"
+              >
+                <option value="">⚠️ NO TABLE ASSIGNED</option>
+                {Array.from({ length: 20 }, (_, i) => (
+                  <option key={i + 1} value={String(i + 1)}>
+                    TABLE {i + 1}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleSaveTable}
+                disabled={editedTableId === (order.tableId || '')}
+                className="px-4 py-2 border-2 border-black bg-black text-white text-sm font-bold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                [SAVE TABLE]
+              </button>
+            </div>
+            {editedTableId !== (order.tableId || '') && (
+              <p className="text-xs text-amber-700 mt-2">
+                Table assignment changed. Click SAVE to confirm.
+              </p>
+            )}
+          </div>
+        )}
+        {order.orderType === 'TAKE_AWAY' && (
+          <div className="border-2 border-blue-600 bg-blue-50 p-4 mb-6">
+            <h2 className="text-xs font-bold text-blue-800 mb-2">[ CUSTOMER INFORMATION ]</h2>
+            <div className="text-sm space-y-1 text-blue-900">
+              {order.customerName && <p><span className="font-bold">Name:</span> {order.customerName}</p>}
+              {order.customerPhone && <p><span className="font-bold">Phone:</span> {order.customerPhone}</p>}
+              {order.customerEmail && <p><span className="font-bold">Email:</span> {order.customerEmail}</p>}
+              {order.pickupTime && <p><span className="font-bold">Pickup:</span> {new Date(order.pickupTime instanceof Date ? order.pickupTime : (order.pickupTime as unknown as { seconds: number }).seconds * 1000).toLocaleString()}</p>}
+            </div>
+          </div>
+        )}
 
         {/* Order Items */}
         <div className="border-2 border-black mb-6">

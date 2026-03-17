@@ -159,7 +159,7 @@ export default function AdminDashboard() {
                 recentOrders.map((order) => (
                   <div key={order.id} className="p-3 hover:bg-gray-50">
                     <div className="grid grid-cols-5 gap-4 text-sm">
-                      <div className="font-bold">#{order.id.slice(-6).toUpperCase()}</div>
+                      <div className="font-bold">#{order.orderNumber || order.id.slice(-6).toUpperCase()}</div>
                       <div>TABLE {order.tableId}</div>
                       <div>{order.items?.length || 0}</div>
                       <div className="font-bold">฿{order.total?.toFixed(2) || '0.00'}</div>
@@ -186,7 +186,7 @@ export default function AdminDashboard() {
                 <div key={order.id} className="p-4">
                   <div className="flex justify-between items-start mb-2">
                     <div>
-                      <p className="text-xs font-bold">#{order.id.slice(-6).toUpperCase()}</p>
+                      <p className="text-xs font-bold">#{order.orderNumber || order.id.slice(-6).toUpperCase()}</p>
                       <p className="text-xs">TABLE {order.tableId}</p>
                     </div>
                     <span className="px-2 py-1 border border-black text-xs">

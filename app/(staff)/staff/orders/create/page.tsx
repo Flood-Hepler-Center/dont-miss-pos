@@ -6,13 +6,26 @@ import { useRouter } from 'next/navigation';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { orderService } from '@/lib/services/order.service';
-import type { OrderItem, MenuItem, MenuCategory, SelectedModifier } from '@/types';
+import type { OrderItem, MenuItem, MenuCategory, SelectedModifier, OrderType } from '@/types';
 import { X } from 'lucide-react';
 import { ItemModifierModal } from '@/components/shared/ItemModifierModal';
+import { OrderTypeSelector } from '@/components/orders/OrderTypeSelector';
+import { CustomerInfoForm } from '@/components/orders/CustomerInfoForm';
+import { PickupTimeSelector } from '@/components/orders/PickupTimeSelector';
 
 export default function CreateOrderPage() {
   const router = useRouter();
+  const [orderType, setOrderType] = useState<OrderType>('DINE_IN');
   const [tableId, setTableId] = useState<string>('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [pickupTime, setPickupTime] = useState<Date | undefined>();
+  const [formErrors, setFormErrors] = useState<{
+    customerName?: string;
+    customerPhone?: string;
+    customerEmail?: string;
+  }>({});
   const [items, setItems] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -145,9 +158,26 @@ export default function CreateOrderPage() {
   });
 
   const handleSubmit = async () => {
-    if (!tableId) {
-      message.error('Please select a table');
-      return;
+    // Validation - allow DINE_IN without table (flexible table assignment)
+    if (orderType === 'TAKE_AWAY') {
+      const errors: typeof formErrors = {};
+      if (!customerName.trim()) {
+        errors.customerName = 'Customer name is required for take-away orders';
+      }
+      if (!customerPhone.trim()) {
+        errors.customerPhone = 'Phone number is required for take-away orders';
+      } else if (!/^0\d{9}$/.test(customerPhone)) {
+        errors.customerPhone = 'Phone must be 10 digits starting with 0';
+      }
+      if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+        errors.customerEmail = 'Please enter a valid email address';
+      }
+      
+      if (Object.keys(errors).length > 0) {
+        setFormErrors(errors);
+        message.error('Please fill in all required customer information');
+        return;
+      }
     }
 
     if (items.length === 0) {
@@ -157,13 +187,22 @@ export default function CreateOrderPage() {
 
     try {
       setLoading(true);
-      await orderService.create({
-        tableId,
-        sessionId: `manual-${Date.now()}`,
+      const orderInput = {
+        orderType,
+        tableId: orderType === 'DINE_IN' ? tableId : null,
+        sessionId: orderType === 'DINE_IN' ? `manual-${Date.now()}` : null,
         items,
-        entryMethod: 'MANUAL',
+        entryMethod: 'MANUAL' as const,
         createdBy: 'current-staff',
-      });
+        ...(orderType === 'TAKE_AWAY' && {
+          customerName: customerName.trim(),
+          customerPhone: customerPhone.trim(),
+          ...(customerEmail.trim() && { customerEmail: customerEmail.trim() }),
+          ...(pickupTime && { pickupTime }),
+        }),
+      };
+      
+      await orderService.create(orderInput);
 
       message.success('Order created successfully');
       router.push('/staff/orders');
@@ -196,22 +235,56 @@ export default function CreateOrderPage() {
                 <h2 className="text-center font-bold">[ SELECT ITEMS ]</h2>
               </div>
 
-              {/* Table Selection */}
+              {/* Order Type Selection */}
               <div className="p-4 border-b-2 border-black">
-                <label className="block text-xs font-bold mb-2">TABLE NUMBER *</label>
-                <select
-                  value={tableId}
-                  onChange={(e) => setTableId(e.target.value)}
-                  className="w-full px-4 py-3 border-2 border-black text-sm focus:outline-none"
-                >
-                  <option value="">SELECT TABLE</option>
-                  {Array.from({ length: 20 }, (_, i) => (
-                    <option key={i + 1} value={String(i + 1)}>
-                      TABLE {i + 1}
-                    </option>
-                  ))}
-                </select>
+                <label className="block text-xs font-bold mb-2">ORDER TYPE *</label>
+                <OrderTypeSelector value={orderType} onChange={setOrderType} />
               </div>
+
+              {/* Conditional: Table Selection (DINE_IN only) */}
+              {orderType === 'DINE_IN' && (
+                <div className="p-4 border-b-2 border-black">
+                  <label className="block text-xs font-bold mb-2">TABLE NUMBER *</label>
+                  <select
+                    value={tableId}
+                    onChange={(e) => setTableId(e.target.value)}
+                    className="w-full px-4 py-3 border-2 border-black text-sm focus:outline-none"
+                  >
+                    <option value="">NO TABLE (Flexible Assignment)</option>
+                    {Array.from({ length: 20 }, (_, i) => (
+                      <option key={i + 1} value={String(i + 1)}>
+                        TABLE {i + 1}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Conditional: Customer Info (TAKE_AWAY only) */}
+              {orderType === 'TAKE_AWAY' && (
+                <>
+                  <div className="p-4 border-b-2 border-black">
+                    <CustomerInfoForm
+                      customerName={customerName}
+                      customerPhone={customerPhone}
+                      customerEmail={customerEmail}
+                      onChange={(field, value) => {
+                        if (field === 'customerName') setCustomerName(value);
+                        if (field === 'customerPhone') setCustomerPhone(value);
+                        if (field === 'customerEmail') setCustomerEmail(value);
+                        // Clear error when user types
+                        if (formErrors[field]) {
+                          setFormErrors(prev => ({ ...prev, [field]: undefined }));
+                        }
+                      }}
+                      errors={formErrors}
+                    />
+                  </div>
+                  <div className="p-4 border-b-2 border-black">
+                    <PickupTimeSelector value={pickupTime} onChange={setPickupTime} />
+                  </div>
+                </>
+              )}
 
               {/* Search & Filter */}
               <div className="p-4 border-b-2 border-black">
@@ -360,7 +433,7 @@ export default function CreateOrderPage() {
                   </button>
                   <button
                     onClick={handleSubmit}
-                    disabled={loading || items.length === 0 || !tableId}
+                    disabled={loading || items.length === 0}
                     className="px-4 py-3 border-2 border-black bg-black text-white font-bold text-sm hover:bg-gray-800 disabled:opacity-50"
                   >
                     {loading ? '[CREATING...]' : '[CREATE]'}

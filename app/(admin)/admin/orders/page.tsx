@@ -1,103 +1,33 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, where, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import type { Payment } from '@/types';
+import type { Order, OrderType } from '@/types';
 import { format } from 'date-fns';
-
-interface OrderItem {
-  id: string;
-  name: string;
-  quantity: number;
-  price: number;
-  totalPrice: number;
-}
-
-interface Order {
-  id: string;
-  tableId: string;
-  items: OrderItem[];
-  subtotal: number;
-  tax: number;
-  total: number;
-  status: string;
-  paymentMethod?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
+import { OrderTypeBadge } from '@/components/orders/OrderTypeBadge';
 
 export default function OrdersManagementPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [dateFilter, setDateFilter] = useState('today');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [orderTypeFilter, setOrderTypeFilter] = useState<OrderType | 'all'>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [payments, setPayments] = useState<Payment[]>([]);
 
   useEffect(() => {
     const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
-      const ordersData = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          tableId: data.tableId,
-          items: data.items || [],
-          subtotal: data.subtotal || 0,
-          tax: data.tax || 0,
-          total: data.total || 0,
-          status: data.status,
-          paymentMethod: data.paymentMethod,
-          createdAt: data.createdAt?.toDate?.() || new Date(),
-          updatedAt: data.updatedAt?.toDate?.() || new Date(),
-        };
-      }) as Order[];
+      const ordersData = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Order[];
       setOrders(ordersData);
     });
 
     return () => unsubscribe();
   }, []);
-
-  // Fetch payments for financial accuracy
-  useEffect(() => {
-    // Generate date range based on dateFilter
-    const now = new Date();
-    let startDate: Date;
-    
-    if (dateFilter === 'today') {
-      startDate = new Date(now);
-      startDate.setHours(0, 0, 0, 0);
-    } else if (dateFilter === 'week') {
-      startDate = new Date(now);
-      startDate.setDate(startDate.getDate() - 7);
-    } else if (dateFilter === 'month') {
-      startDate = new Date(now);
-      startDate.setMonth(startDate.getMonth() - 1);
-    } else {
-      startDate = new Date(2024, 0, 1); // Default to a reasonable start date
-    }
-
-    const paymentsQuery = query(
-      collection(db, 'payments'),
-      where('createdAt', '>=', startDate),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(paymentsQuery, (snapshot) => {
-      const paymentsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
-      })) as Payment[];
-      
-      // Filter out VOIDED payments for revenue
-      setPayments(paymentsData.filter(p => p.status !== 'VOIDED'));
-    });
-
-    return () => unsubscribe();
-  }, [dateFilter]);
 
   useEffect(() => {
     let filtered = [...orders];
@@ -106,15 +36,30 @@ export default function OrdersManagementPage() {
     if (dateFilter === 'today') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      filtered = filtered.filter((order) => order.createdAt >= today);
+      filtered = filtered.filter((order) => {
+        const orderDate = order.createdAt instanceof Date 
+          ? order.createdAt 
+          : new Date((order.createdAt as { seconds: number }).seconds * 1000);
+        return orderDate >= today;
+      });
     } else if (dateFilter === 'week') {
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
-      filtered = filtered.filter((order) => order.createdAt >= weekAgo);
+      filtered = filtered.filter((order) => {
+        const orderDate = order.createdAt instanceof Date 
+          ? order.createdAt 
+          : new Date((order.createdAt as { seconds: number }).seconds * 1000);
+        return orderDate >= weekAgo;
+      });
     } else if (dateFilter === 'month') {
       const monthAgo = new Date();
       monthAgo.setMonth(monthAgo.getMonth() - 1);
-      filtered = filtered.filter((order) => order.createdAt >= monthAgo);
+      filtered = filtered.filter((order) => {
+        const orderDate = order.createdAt instanceof Date 
+          ? order.createdAt 
+          : new Date((order.createdAt as { seconds: number }).seconds * 1000);
+        return orderDate >= monthAgo;
+      });
     }
 
     // Status filter
@@ -122,14 +67,18 @@ export default function OrdersManagementPage() {
       filtered = filtered.filter((order) => order.status === statusFilter);
     }
 
+    // Order type filter
+    if (orderTypeFilter !== 'all') {
+      filtered = filtered.filter((order) => order.orderType === orderTypeFilter);
+    }
+
     setFilteredOrders(filtered);
-  }, [orders, dateFilter, statusFilter]);
+  }, [orders, dateFilter, statusFilter, orderTypeFilter]);
 
   // Calculate stats
-  // Calculate stats from payments for accuracy
-  const totalRevenue = payments.reduce((sum, p) => sum + p.total, 0);
+  const totalRevenue = filteredOrders.reduce((sum, o) => sum + (o.total || 0), 0);
   const totalOrders = filteredOrders.length;
-  const avgOrderValue = payments.length > 0 ? totalRevenue / payments.length : 0;
+  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
   const completedOrders = filteredOrders.filter((o) => o.status === 'COMPLETED').length;
 
   const statusCounts = {
@@ -139,6 +88,10 @@ export default function OrdersManagementPage() {
     SERVED: filteredOrders.filter((o) => o.status === 'SERVED').length,
     COMPLETED: filteredOrders.filter((o) => o.status === 'COMPLETED').length,
   };
+
+  // Order type breakdown
+  const dineInOrders = filteredOrders.filter(o => o.orderType === 'DINE_IN' || !o.orderType).length;
+  const takeAwayOrders = filteredOrders.filter(o => o.orderType === 'TAKE_AWAY').length;
 
   return (
     <div className="min-h-screen bg-white font-mono p-4 md:p-6">
@@ -173,6 +126,18 @@ export default function OrdersManagementPage() {
           </div>
         </div>
 
+        {/* Order Type Stats */}
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="border-2 border-black p-4 text-center">
+            <p className="text-xs mb-2">DINE-IN ORDERS</p>
+            <p className="text-2xl md:text-3xl font-bold">{dineInOrders}</p>
+          </div>
+          <div className="border-2 border-blue-600 bg-blue-50 p-4 text-center">
+            <p className="text-xs mb-2 text-blue-800">TAKE-AWAY ORDERS</p>
+            <p className="text-2xl md:text-3xl font-bold text-blue-800">{takeAwayOrders}</p>
+          </div>
+        </div>
+
         {/* Status Breakdown */}
         <div className="border-2 border-black mb-6">
           <div className="border-b-2 border-black p-3 bg-white">
@@ -203,7 +168,7 @@ export default function OrdersManagementPage() {
         </div>
 
         {/* Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
           <div>
             <label className="block text-xs font-bold mb-2">DATE RANGE</label>
             <select
@@ -232,6 +197,18 @@ export default function OrdersManagementPage() {
               <option value="COMPLETED">COMPLETED</option>
             </select>
           </div>
+          <div>
+            <label className="block text-xs font-bold mb-2">ORDER TYPE</label>
+            <select
+              value={orderTypeFilter}
+              onChange={(e) => setOrderTypeFilter(e.target.value as OrderType | 'all')}
+              className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
+            >
+              <option value="all">ALL TYPES</option>
+              <option value="DINE_IN">DINE-IN</option>
+              <option value="TAKE_AWAY">TAKE-AWAY</option>
+            </select>
+          </div>
         </div>
 
         {/* Orders List - Desktop */}
@@ -239,7 +216,7 @@ export default function OrdersManagementPage() {
           <div className="border-b-2 border-black p-3 bg-white">
             <div className="grid grid-cols-7 gap-4 text-xs font-bold">
               <div>ORDER ID</div>
-              <div>TABLE</div>
+              <div>TYPE</div>
               <div>DATE/TIME</div>
               <div>ITEMS</div>
               <div>TOTAL</div>
@@ -251,15 +228,15 @@ export default function OrdersManagementPage() {
             {filteredOrders.map((order) => (
               <div key={order.id} className="p-3 hover:bg-gray-50">
                 <div className="grid grid-cols-7 gap-4 text-sm items-center">
-                  <div className="font-bold">#{order.id.slice(-6).toUpperCase()}</div>
-                  <div>TABLE {order.tableId}</div>
+                  <div className="font-bold">#{order.orderNumber || order.id.slice(-6).toUpperCase()}</div>
+                  <div><OrderTypeBadge orderType={order.orderType || 'DINE_IN'} /></div>
                   <div className="text-xs">
-                    {format(order.createdAt, 'dd MMM yyyy')}
+                    {format(order.createdAt instanceof Date ? order.createdAt : new Date((order.createdAt as { seconds: number }).seconds * 1000), 'dd MMM yyyy')}
                     <br />
-                    {format(order.createdAt, 'HH:mm')}
+                    {format(order.createdAt instanceof Date ? order.createdAt : new Date((order.createdAt as { seconds: number }).seconds * 1000), 'HH:mm')}
                   </div>
                   <div>{order.items?.length || 0}</div>
-                  <div className="font-bold">฿{order.total.toFixed(2)}</div>
+                  <div className="font-bold">฿{(order.total || 0).toFixed(2)}</div>
                   <div>
                     <span className="px-2 py-1 border-2 border-black text-xs">{order.status}</span>
                   </div>
@@ -286,14 +263,24 @@ export default function OrdersManagementPage() {
             <div key={order.id} className="border-2 border-black p-4">
               <div className="flex justify-between items-start mb-3">
                 <div>
-                  <p className="text-sm font-bold">#{order.id.slice(-6).toUpperCase()}</p>
-                  <p className="text-xs mt-1">TABLE {order.tableId}</p>
-                  <p className="text-xs mt-1">{format(order.createdAt, 'dd MMM yyyy HH:mm')}</p>
+                  <p className="text-sm font-bold">#{order.orderNumber || order.id.slice(-6).toUpperCase()}</p>
+                  <div className="flex gap-2 mt-1">
+                    <OrderTypeBadge orderType={order.orderType || 'DINE_IN'} />
+                  </div>
+                  <p className="text-xs mt-1">
+                    {order.orderType === 'TAKE_AWAY' 
+                      ? (order.customerName || 'Unknown')
+                      : `TABLE ${order.tableId || '-'}`
+                    }
+                  </p>
+                  <p className="text-xs mt-1">
+                    {format(order.createdAt instanceof Date ? order.createdAt : new Date((order.createdAt as { seconds: number }).seconds * 1000), 'dd MMM yyyy HH:mm')}
+                  </p>
                 </div>
                 <span className="px-2 py-1 border-2 border-black text-xs font-bold">{order.status}</span>
               </div>
               <div className="text-sm mb-3">
-                <p className="font-bold">฿{order.total.toFixed(2)}</p>
+                <p className="font-bold">฿{(order.total || 0).toFixed(2)}</p>
                 <p className="text-xs">{order.items?.length || 0} items</p>
               </div>
               <button
@@ -326,15 +313,26 @@ export default function OrdersManagementPage() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-xs font-bold mb-1">ORDER ID</p>
-                    <p>#{selectedOrder.id.slice(-8).toUpperCase()}</p>
+                    <p>#{selectedOrder.orderNumber || selectedOrder.id.slice(-8).toUpperCase()}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-bold mb-1">TABLE</p>
-                    <p>TABLE {selectedOrder.tableId}</p>
+                    <p className="text-xs font-bold mb-1">TYPE</p>
+                    <OrderTypeBadge orderType={selectedOrder.orderType || 'DINE_IN'} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold mb-1">
+                      {selectedOrder.orderType === 'TAKE_AWAY' ? 'CUSTOMER' : 'TABLE'}
+                    </p>
+                    <p>
+                      {selectedOrder.orderType === 'TAKE_AWAY' 
+                        ? (selectedOrder.customerName || 'Unknown')
+                        : `TABLE ${selectedOrder.tableId || '-'}`
+                      }
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs font-bold mb-1">DATE/TIME</p>
-                    <p>{format(selectedOrder.createdAt, 'dd MMM yyyy HH:mm')}</p>
+                    <p>{format(selectedOrder.createdAt instanceof Date ? selectedOrder.createdAt : new Date((selectedOrder.createdAt as { seconds: number }).seconds * 1000), 'dd MMM yyyy HH:mm')}</p>
                   </div>
                   <div>
                     <p className="text-xs font-bold mb-1">STATUS</p>
@@ -343,6 +341,24 @@ export default function OrdersManagementPage() {
                     </span>
                   </div>
                 </div>
+
+                {selectedOrder.orderType === 'TAKE_AWAY' && selectedOrder.customerPhone && (
+                  <div className="text-sm border-2 border-blue-200 bg-blue-50 p-3">
+                    <p className="text-xs font-bold mb-1 text-blue-800">CUSTOMER INFO</p>
+                    <p className="text-blue-900">Phone: {selectedOrder.customerPhone}</p>
+                    {selectedOrder.customerEmail && <p className="text-blue-900">Email: {selectedOrder.customerEmail}</p>}
+                    {selectedOrder.pickupTime && (
+                      <p className="text-blue-900">
+                        Pickup: {format(
+                          selectedOrder.pickupTime instanceof Date 
+                            ? selectedOrder.pickupTime 
+                            : new Date((selectedOrder.pickupTime as unknown as { seconds: number }).seconds * 1000), 
+                          'dd MMM yyyy HH:mm'
+                        )}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div className="border-2 border-black p-3">
                   <p className="text-xs font-bold mb-2">[ITEMS]</p>
@@ -353,7 +369,7 @@ export default function OrdersManagementPage() {
                           <p className="font-bold">{item.name}</p>
                           <p className="text-xs">Qty: {item.quantity} × ฿{item.price.toFixed(2)}</p>
                         </div>
-                        <p className="font-bold">฿{item.totalPrice}</p>
+                        <p className="font-bold">฿{item.subtotal.toFixed(2)}</p>
                       </div>
                     ))}
                   </div>

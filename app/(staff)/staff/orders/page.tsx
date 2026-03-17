@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { orderService } from '@/lib/services/order.service';
-import type { Order } from '@/types';
+import type { Order, OrderType } from '@/types';
+import { OrderTypeBadge } from '@/components/orders/OrderTypeBadge';
 
 export default function OrdersPage() {
   const router = useRouter();
@@ -14,6 +15,8 @@ export default function OrdersPage() {
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [orderTypeFilter, setOrderTypeFilter] = useState<OrderType | 'all'>('all');
+  const [tableStatusFilter, setTableStatusFilter] = useState<'all' | 'hasTable' | 'noTable'>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -37,8 +40,9 @@ export default function OrdersPage() {
     if (searchText) {
       filtered = filtered.filter(
         (order) =>
-          order.tableId.toLowerCase().includes(searchText.toLowerCase()) ||
-          order.id.toLowerCase().includes(searchText.toLowerCase())
+          (order.tableId?.toLowerCase().includes(searchText.toLowerCase()) || false) ||
+          order.id.toLowerCase().includes(searchText.toLowerCase()) ||
+          (order.customerName?.toLowerCase().includes(searchText.toLowerCase()) || false)
       );
     }
 
@@ -46,8 +50,20 @@ export default function OrdersPage() {
       filtered = filtered.filter((order) => order.status === statusFilter);
     }
 
+    if (orderTypeFilter !== 'all') {
+      filtered = filtered.filter((order) => order.orderType === orderTypeFilter);
+    }
+
+    if (tableStatusFilter !== 'all') {
+      filtered = filtered.filter((order) => {
+        if (order.orderType === 'TAKE_AWAY') return true; // Always show take-away
+        const hasTable = !!order.tableId;
+        return tableStatusFilter === 'hasTable' ? hasTable : !hasTable;
+      });
+    }
+
     setFilteredOrders(filtered);
-  }, [searchText, statusFilter, orders]);
+  }, [searchText, statusFilter, orderTypeFilter, tableStatusFilter, orders]);
 
   const handleVoidOrder = async (orderId: string) => {
     try {
@@ -87,6 +103,15 @@ export default function OrdersPage() {
             className="flex-1 px-4 py-3 border-2 border-black text-sm focus:outline-none focus:ring-0"
           />
           <select
+            value={orderTypeFilter}
+            onChange={(e) => setOrderTypeFilter(e.target.value as OrderType | 'all')}
+            className="px-4 py-3 border-2 border-black text-sm focus:outline-none focus:ring-0"
+          >
+            <option value="all">ALL TYPES</option>
+            <option value="DINE_IN">DINE-IN</option>
+            <option value="TAKE_AWAY">TAKE-AWAY</option>
+          </select>
+          <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="px-4 py-3 border-2 border-black text-sm focus:outline-none focus:ring-0"
@@ -99,14 +124,24 @@ export default function OrdersPage() {
             <option value="COMPLETED">COMPLETED</option>
             <option value="CANCELLED">CANCELLED</option>
           </select>
+          <select
+            value={tableStatusFilter}
+            onChange={(e) => setTableStatusFilter(e.target.value as 'all' | 'hasTable' | 'noTable')}
+            className="px-4 py-3 border-2 border-black text-sm focus:outline-none focus:ring-0"
+          >
+            <option value="all">ALL TABLES</option>
+            <option value="hasTable">HAS TABLE</option>
+            <option value="noTable">NO TABLE ⚠️</option>
+          </select>
         </div>
 
         {/* Orders List - Desktop Table */}
         <div className="hidden md:block border-2 border-black">
           <div className="border-b-2 border-black p-3 bg-white">
-            <div className="grid grid-cols-6 gap-4 text-xs font-bold">
+            <div className="grid grid-cols-7 gap-4 text-xs font-bold">
               <div>ORDER ID</div>
-              <div>TABLE</div>
+              <div>TYPE</div>
+              <div>TABLE/CUSTOMER</div>
               <div>ITEMS</div>
               <div>TOTAL</div>
               <div>STATUS</div>
@@ -118,9 +153,17 @@ export default function OrdersPage() {
             {filteredOrders.length > 0 ? (
               filteredOrders.map((order) => (
                 <div key={order.id} className="p-3 hover:bg-gray-50">
-                  <div className="grid grid-cols-6 gap-4 text-sm items-center">
-                    <div className="font-bold">#{order.id.slice(-6).toUpperCase()}</div>
-                    <div>TABLE {order.tableId}</div>
+                  <div className="grid grid-cols-7 gap-4 text-sm items-center">
+                    <div className="font-bold">#{order.orderNumber || order.id.slice(-6).toUpperCase()}</div>
+                    <div><OrderTypeBadge orderType={order.orderType || 'DINE_IN'} /></div>
+                    <div>
+                      {order.orderType === 'TAKE_AWAY' 
+                        ? (order.customerName || 'Unknown')
+                        : order.tableId 
+                          ? `TABLE ${order.tableId}`
+                          : <span className="text-amber-600 font-bold">⚠️ NO TABLE</span>
+                      }
+                    </div>
                     <div>{order.items?.length || 0}</div>
                     <div className="font-bold">฿{order.total?.toFixed(2) || '0.00'}</div>
                     <div>
@@ -163,12 +206,20 @@ export default function OrdersPage() {
               <div key={order.id} className="border-2 border-black p-4">
                 <div className="flex justify-between items-start mb-3">
                   <div>
-                    <p className="text-sm font-bold">#{order.id.slice(-6).toUpperCase()}</p>
-                    <p className="text-xs mt-1">TABLE {order.tableId}</p>
+                    <p className="text-sm font-bold">#{order.orderNumber || order.id.slice(-6).toUpperCase()}</p>
+                    <p className="text-xs mt-1">
+                      {order.orderType === 'TAKE_AWAY' 
+                        ? (order.customerName || 'Unknown')
+                        : `TABLE ${order.tableId || '-'}`
+                      }
+                    </p>
                   </div>
-                  <span className="px-2 py-1 border-2 border-black text-xs font-bold">
-                    {order.status}
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <OrderTypeBadge orderType={order.orderType || 'DINE_IN'} />
+                    <span className="px-2 py-1 border-2 border-black text-xs font-bold">
+                      {order.status}
+                    </span>
+                  </div>
                 </div>
                 
                 <div className="border-t-2 border-dashed border-black pt-2 mb-3">
@@ -212,8 +263,18 @@ export default function OrdersPage() {
               <div className="border-b-2 border-black p-4 bg-white sticky top-0">
                 <div className="text-center">
                   <div className="text-sm">═══════</div>
-                  <h2 className="text-xl font-bold my-1">ORDER #{selectedOrder.id.slice(-6).toUpperCase()}</h2>
-                  <p className="text-xs">TABLE {selectedOrder.tableId} • {selectedOrder.status}</p>
+                  <h2 className="text-xl font-bold my-1">ORDER #{selectedOrder.orderNumber || selectedOrder.id.slice(-6).toUpperCase()}</h2>
+                  <div className="flex justify-center gap-2 mb-1">
+                    <OrderTypeBadge orderType={selectedOrder.orderType || 'DINE_IN'} />
+                    <span className="text-xs">•</span>
+                    <span className="text-xs">{selectedOrder.status}</span>
+                  </div>
+                  <p className="text-xs">
+                    {selectedOrder.orderType === 'TAKE_AWAY' 
+                      ? (selectedOrder.customerName || 'Unknown')
+                      : `TABLE ${selectedOrder.tableId || '-'}`
+                    }
+                  </p>
                   <div className="text-sm">═══════</div>
                 </div>
               </div>

@@ -3,6 +3,9 @@
  * Source: BA Data Model - dm-orders-tables.md
  */
 
+/** Order type classification */
+export type OrderType = 'DINE_IN' | 'TAKE_AWAY';
+
 /** Order status lifecycle: PLACED → PREPARING → READY → SERVED → COMPLETED */
 export type OrderStatus =
   | 'PLACED'
@@ -43,8 +46,20 @@ export type OrderItem = {
 /** Order document from Firestore */
 export type Order = {
   id: string;
-  tableId: string;
-  sessionId: string;
+  orderNumber?: string;
+  orderType: OrderType;  // NEW - Required field
+  tableId?: string | null;  // MODIFIED - Now optional
+  sessionId?: string | null;  // MODIFIED - Now optional
+  
+  // Customer Info (for take-away)
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  
+  // Take-away Specific
+  pickupTime?: Date;
+  actualPickupTime?: Date;
+  
   items: OrderItem[];
   subtotal: number;
   tax: number;
@@ -56,6 +71,11 @@ export type Order = {
   createdBy?: string;
   createdAt: Date;
   updatedAt: Date;
+  
+  // Table Assignment Audit
+  tableAssignedAt?: Date;
+  tableAssignedBy?: string;
+  
   placedAt?: Date;
   preparingAt?: Date;
   readyAt?: Date;
@@ -70,9 +90,20 @@ export type Order = {
 
 /** Input for creating a new order */
 export type CreateOrderInput = {
-  tableId: string;
-  sessionId: string;
+  orderType: OrderType;  // NEW - Required
+  tableId?: string | null;  // MODIFIED - Optional
+  sessionId?: string | null;  // MODIFIED - Optional
   items: OrderItem[];
   entryMethod: 'QR' | 'MANUAL';
   createdBy?: string;
+  
+  // Customer info for take-away
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  
+  // Take-away specific
+  pickupTime?: Date;
+  
+  specialInstructions?: string;
 };

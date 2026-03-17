@@ -124,7 +124,7 @@ export default function TablesPage() {
                       {tableOrders.map((order) => (
                         <div key={order.id} className="border-2 border-black p-3">
                           <div className="flex justify-between items-center mb-2 text-sm">
-                            <span className="font-bold">ORDER #{order.id.slice(-6).toUpperCase()}</span>
+                            <span className="font-bold">ORDER #{order.orderNumber || order.id.slice(-6).toUpperCase()}</span>
                             <span className="px-2 py-1 border-2 border-black text-xs">
                               {order.status}
                             </span>

@@ -143,6 +143,7 @@ export type ProcessPaymentInput = {
   tableId: string;
   orderIds: string[];
   sessionId: string;
+  receiptNumber?: string;
   subtotal: number;
   discountAmount: number;
   discountType?: DiscountType;

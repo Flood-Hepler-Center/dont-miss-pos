@@ -56,7 +56,7 @@ function OrderSuccessContent() {
         <div className="space-y-3 mb-6">
           <div className="flex justify-between text-sm">
             <span>ORDER #:</span>
-            <span className="font-bold">{order.id.slice(-8).toUpperCase()}</span>
+            <span className="font-bold">{order.orderNumber || order.id.slice(-6).toUpperCase()}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span>TABLE #:</span>

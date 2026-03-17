@@ -4,10 +4,10 @@ import { useState, useEffect } from 'react';
 import { message } from 'antd';
 import { runTransaction, doc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { format } from 'date-fns';
+
 import { useAuthStore } from '@/lib/stores/authStore';
-import QRCode from 'qrcode';
 import Image from 'next/image';
+import { paymentService } from '@/lib/services/payment.service';
 import type { Table, Order, Payment } from '@/types';
 
 interface BillCalculation {
@@ -23,7 +23,7 @@ interface BillCalculation {
 
 interface PromptPayPaymentProps {
   total: number;
-  table: Table;
+  table: Table | null;
   orders: Order[];
   billCalculation: BillCalculation;
   onComplete: (payment: Payment) => void;
@@ -31,14 +31,14 @@ interface PromptPayPaymentProps {
 }
 
 export function PromptPayPayment({ total, table, orders, billCalculation, onComplete, onBack }: PromptPayPaymentProps) {
-  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [processing, setProcessing] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(900);
   const staffId = useAuthStore((state) => state.staffId);
   const [receiptNumber, setReceiptNumber] = useState<string>('');
+  const FIXED_QR_URL = '/assets/promptpay-qr.jpg'; // Fixed QR image
 
   useEffect(() => {
-    generateQRCode();
+    paymentService.generateReceiptNumber().then(setReceiptNumber);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -56,29 +56,6 @@ export function PromptPayPayment({ total, table, orders, billCalculation, onComp
     return () => clearInterval(timer);
   }, []);
 
-  const generateQRCode = async () => {
-    try {
-      const receipt = await getNextReceiptNumber();
-      setReceiptNumber(receipt);
-
-      const qrData = {
-        merchantId: 'PROMPTPAY_ID_HERE',
-        amount: total,
-        reference: receipt,
-        currency: 'THB',
-      };
-
-      const qrUrl = await QRCode.toDataURL(JSON.stringify(qrData), {
-        width: 300,
-        margin: 2,
-      });
-      setQrCodeUrl(qrUrl);
-    } catch (error) {
-      console.error('QR generation error:', error);
-      message.error('Failed to generate QR code');
-    }
-  };
-
   const handlePaymentReceived = async () => {
     setProcessing(true);
 
@@ -88,9 +65,9 @@ export function PromptPayPayment({ total, table, orders, billCalculation, onComp
       const paymentData: Payment = {
         id: '',
         receiptNumber,
-        tableId: table.id,
+        tableId: table?.id || '',
         orderIds,
-        sessionId: typeof table.currentSession === 'string' ? table.currentSession : (table.currentSession?.sessionId || ''),
+        sessionId: table ? (typeof table.currentSession === 'string' ? table.currentSession : (table.currentSession?.sessionId || '')) : '',
         subtotal: billCalculation.subtotal,
         discountAmount: billCalculation.discountAmount,
         discountType: billCalculation.discountType,
@@ -145,13 +122,16 @@ export function PromptPayPayment({ total, table, orders, billCalculation, onComp
           });
         });
 
-        const tableRef = doc(db, 'tables', table.id);
-        transaction.update(tableRef, {
-          status: 'VACANT',
-          activeOrders: [],
-          currentSessionId: null,
-          totalAmount: 0,
-        });
+        // Only update table if it exists
+        if (table) {
+          const tableRef = doc(db, 'tables', table.id);
+          transaction.update(tableRef, {
+            status: 'VACANT',
+            activeOrders: [],
+            currentSessionId: null,
+            totalAmount: 0,
+          });
+        }
       });
 
       message.success('Payment confirmed');
@@ -162,30 +142,6 @@ export function PromptPayPayment({ total, table, orders, billCalculation, onComp
       setProcessing(false);
     }
   };
-
-  async function getNextReceiptNumber(): Promise<string> {
-    const today = format(new Date(), 'yyyyMMdd');
-    const sequenceRef = doc(db, 'receiptSequences', today);
-
-    return await runTransaction(db, async (transaction) => {
-      const sequenceDoc = await transaction.get(sequenceRef);
-      const nextSeq = sequenceDoc.exists()
-        ? sequenceDoc.data().currentSequence + 1
-        : 1;
-
-      transaction.set(
-        sequenceRef,
-        {
-          currentSequence: nextSeq,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      const paddedSeq = String(nextSeq).padStart(4, '0');
-      return `R${today}-${paddedSeq}`;
-    });
-  }
 
   const minutes = Math.floor(timeRemaining / 60);
   const seconds = timeRemaining % 60;
@@ -200,12 +156,6 @@ export function PromptPayPayment({ total, table, orders, billCalculation, onComp
       </button>
 
       <div className="border-2 border-black">
-        <div className="border-b-2 border-black p-4 text-center">
-          <div className="text-sm"></div>
-          <h2 className="text-xl font-bold my-1">PROMPTPAY PAYMENT</h2>
-          <div className="text-sm"></div>
-        </div>
-
         <div className="p-6 space-y-6">
           {/* Amount */}
           <div className="border-2 border-black p-6">
@@ -215,32 +165,42 @@ export function PromptPayPayment({ total, table, orders, billCalculation, onComp
             </div>
           </div>
 
-          {/* QR Code */}
-          {qrCodeUrl && (
-            <div className="border-2 border-black p-6">
-              <div className="text-center">
-                <p className="text-xs mb-4 font-bold">[ SCAN QR CODE TO PAY ]</p>
-                <div className="flex justify-center mb-4 border-2 border-black inline-block p-2">
-                  <Image src={qrCodeUrl} alt="PromptPay QR Code" width={280} height={280} />
-                </div>
-                <div className="text-xs border-t-2 border-dashed border-black pt-3 mt-3">
-                  <p>REFERENCE: {receiptNumber}</p>
-                </div>
+          {/* Fixed QR Code */}
+          <div className="border-2 border-black p-6">
+            <div className="text-center">
+              <p className="text-xs mb-4 font-bold">[ SCAN QR CODE TO PAY ]</p>
+              <div className="flex justify-center mb-4 border-2 border-black inline-block p-2">
+                <Image 
+                  src={FIXED_QR_URL} 
+                  alt="PromptPay QR Code" 
+                  width={280} 
+                  height={280}
+                  onError={(e) => {
+                    // Fallback if image not found
+                    (e.target as HTMLImageElement).src = '/assets/placeholder-qr.png';
+                  }}
+                />
+              </div>
+              <div className="text-xs border-t-2 border-dashed border-black pt-3 mt-3">
+                <p>REFERENCE: {receiptNumber}</p>
+                <p className="mt-1 text-gray-500">AMOUNT: ฿{total.toFixed(2)}</p>
               </div>
             </div>
-          )}
+          </div>
 
           {/* Timer */}
           <div className="border-2 border-dashed border-black p-4">
             <div className="text-center text-sm">
-              <p>⏱ QR EXPIRES IN {minutes}:{seconds.toString().padStart(2, '0')}</p>
+              <p>⏱ SESSION EXPIRES IN {minutes}:{seconds.toString().padStart(2, '0')}</p>
             </div>
           </div>
 
           {/* Instructions */}
           <div className="border-2 border-black p-4">
             <p className="text-xs text-center">
-              AFTER CUSTOMER COMPLETES PAYMENT,<br />VERIFY AND CONFIRM BELOW
+              SCAN QR CODE WITH BANKING APP<br />
+              ENTER AMOUNT: ฿{total.toFixed(2)}<br />
+              AFTER PAYMENT, CONFIRM BELOW
             </p>
           </div>
 
@@ -253,13 +213,13 @@ export function PromptPayPayment({ total, table, orders, billCalculation, onComp
             {processing ? '[CONFIRMING...]' : '[CONFIRM PAYMENT RECEIVED]'}
           </button>
 
-          {/* Regenerate */}
+          {/* Regenerate - now just resets timer */}
           {timeRemaining === 0 && (
             <button
-              onClick={generateQRCode}
+              onClick={() => setTimeRemaining(900)}
               className="w-full px-6 py-3 border-2 border-black bg-white hover:bg-gray-100 font-bold text-sm"
             >
-              [GENERATE NEW QR CODE]
+              [RESET SESSION]
             </button>
           )}
         </div>

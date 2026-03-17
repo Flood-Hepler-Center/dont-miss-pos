@@ -3,29 +3,13 @@
 import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import type { Order } from '@/types';
 import { format, startOfDay, endOfDay, subDays, startOfWeek, startOfMonth } from 'date-fns';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-interface OrderItem {
-  name: string;
-  quantity: number;
-  price: number;
-}
-
-interface Order {
-  id: string;
-  tableId: string;
-  items: OrderItem[];
-  subtotal: number;
-  tax: number;
-  total: number;
-  status: string;
-  paymentMethod?: string;
-  createdAt: Date;
-}
-
 interface Payment {
   id: string;
+  orderIds: string[];
   total: number;
   subtotal: number;
   tax: number;
@@ -48,20 +32,10 @@ export default function AnalyticsPage() {
     const paymentsQuery = query(collection(db, 'payments'), orderBy('createdAt', 'desc'));
 
     const unsubscribeOrders = onSnapshot(ordersQuery, (snapshot) => {
-      const ordersData = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          tableId: data.tableId,
-          items: data.items || [],
-          subtotal: data.subtotal || 0,
-          tax: data.tax || 0,
-          total: data.total || 0,
-          status: data.status,
-          paymentMethod: data.paymentMethod,
-          createdAt: data.createdAt?.toDate?.() || new Date(),
-        };
-      }) as Order[];
+      const ordersData = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Order[];
       setOrders(ordersData);
     });
 
@@ -70,6 +44,7 @@ export default function AnalyticsPage() {
         const data = doc.data();
         return {
           id: doc.id,
+          orderIds: data.orderIds || [],
           total: data.total || 0,
           subtotal: data.subtotal || 0,
           tax: data.tax || 0,
@@ -136,13 +111,17 @@ export default function AnalyticsPage() {
   const filteredOrders = getFilteredOrders();
   const filteredPayments = getFilteredPayments();
   
+  // Financial Metrics (Payments)
+  const validPayments = filteredPayments.filter(p => p.status === 'COMPLETED');
+
   // Operational Metrics (Orders)
-  const completedOrders = filteredOrders.filter((o) => o.status === 'COMPLETED');
+  // Compute valid orders mapped directly from successfully processed payments
+  const validOrderIds = new Set(validPayments.flatMap(p => p.orderIds || []));
+  const completedOrders = filteredOrders.filter((o) => validOrderIds.has(o.id));
+  
   const totalOrders = completedOrders.length;
   const totalItemsSold = completedOrders.reduce((sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0);
 
-  // Financial Metrics (Payments)
-  const validPayments = filteredPayments.filter(p => p.status === 'COMPLETED');
   const totalRevenue = validPayments.reduce((sum, p) => sum + p.total, 0);
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
@@ -220,6 +199,12 @@ export default function AnalyticsPage() {
 
   const statusData = Object.entries(statusStats).map(([name, value]) => ({ name, value }));
 
+  // Order Type Breakdown
+  const dineInOrders = completedOrders.filter(o => o.orderType === 'DINE_IN' || !o.orderType);
+  const takeAwayOrders = completedOrders.filter(o => o.orderType === 'TAKE_AWAY');
+  const dineInRevenue = dineInOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+  const takeAwayRevenue = takeAwayOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+
   const COLORS = ['#000000', '#4B5563', '#9CA3AF', '#D1D5DB', '#E5E7EB'];
 
   if (loading) {
@@ -281,6 +266,20 @@ export default function AnalyticsPage() {
             <p className="text-2xl md:text-3xl font-bold">
               {totalItemsSold}
             </p>
+          </div>
+        </div>
+
+        {/* Order Type Stats */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
+          <div className="border-2 border-black p-4 text-center">
+            <p className="text-xs mb-2">DINE-IN ORDERS</p>
+            <p className="text-2xl md:text-3xl font-bold">{dineInOrders.length}</p>
+            <p className="text-xs text-gray-600 mt-1">฿{dineInRevenue.toFixed(0)}</p>
+          </div>
+          <div className="border-2 border-blue-600 bg-blue-50 p-4 text-center">
+            <p className="text-xs mb-2 text-blue-800">TAKE-AWAY ORDERS</p>
+            <p className="text-2xl md:text-3xl font-bold text-blue-800">{takeAwayOrders.length}</p>
+            <p className="text-xs text-blue-600 mt-1">฿{takeAwayRevenue.toFixed(0)}</p>
           </div>
         </div>
 

@@ -92,7 +92,7 @@ export default function CustomerOrdersPage() {
                 <div className="border-b-2 border-black p-3 bg-gray-50">
                   <div className="flex justify-between items-center">
                     <div>
-                      <p className="text-xs font-bold">ORDER #{order.id.slice(-8).toUpperCase()}</p>
+                      <p className="text-xs font-bold">ORDER #{order.orderNumber || order.id.slice(-6).toUpperCase()}</p>
                       <p className="text-xs text-gray-600">
                         {order.createdAt && typeof (order.createdAt as unknown as Timestamp).toMillis === 'function' 
                           ? new Date((order.createdAt as unknown as Timestamp).toMillis()).toLocaleTimeString()

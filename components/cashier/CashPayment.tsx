@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { message } from 'antd';
 import { runTransaction, doc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { format } from 'date-fns';
+
 import { useAuthStore } from '@/lib/stores/authStore';
+import { paymentService } from '@/lib/services/payment.service';
 import type { Table, Order, Payment } from '@/types';
 
 interface BillCalculation {
@@ -21,7 +22,7 @@ interface BillCalculation {
 
 interface CashPaymentProps {
   total: number;
-  table: Table;
+  table?: Table | null;
   orders: Order[];
   billCalculation: BillCalculation;
   onComplete: (payment: Payment) => void;
@@ -49,15 +50,15 @@ export function CashPayment({ total, table, orders, billCalculation, onComplete,
     setProcessing(true);
 
     try {
-      const receiptNumber = await getNextReceiptNumber();
+      const receiptNumber = await paymentService.generateReceiptNumber();
       const orderIds = orders.map((o) => o.id);
 
       const paymentData: Payment = {
         id: '',
         receiptNumber,
-        tableId: table.id,
+        tableId: table?.id || 'no-table',
         orderIds,
-        sessionId: typeof table.currentSession === 'string' ? table.currentSession : (table.currentSession?.sessionId || ''),
+        sessionId: table && typeof table.currentSession === 'string' ? table.currentSession : (table?.currentSession?.sessionId || ''),
         subtotal: billCalculation.subtotal,
         discountAmount: billCalculation.discountAmount,
         discountType: billCalculation.discountType,
@@ -112,6 +113,7 @@ export function CashPayment({ total, table, orders, billCalculation, onComplete,
           });
         });
 
+        if (table?.id) {
         const tableRef = doc(db, 'tables', table.id);
         transaction.update(tableRef, {
           status: 'VACANT',
@@ -119,6 +121,7 @@ export function CashPayment({ total, table, orders, billCalculation, onComplete,
           currentSessionId: null,
           totalAmount: 0,
         });
+      }
       });
 
       message.success('Payment processed successfully');
@@ -129,30 +132,6 @@ export function CashPayment({ total, table, orders, billCalculation, onComplete,
       setProcessing(false);
     }
   };
-
-  async function getNextReceiptNumber(): Promise<string> {
-    const today = format(new Date(), 'yyyyMMdd');
-    const sequenceRef = doc(db, 'receiptSequences', today);
-
-    return await runTransaction(db, async (transaction) => {
-      const sequenceDoc = await transaction.get(sequenceRef);
-      const nextSeq = sequenceDoc.exists()
-        ? sequenceDoc.data().currentSequence + 1
-        : 1;
-
-      transaction.set(
-        sequenceRef,
-        {
-          currentSequence: nextSeq,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      const paddedSeq = String(nextSeq).padStart(4, '0');
-      return `R${today}-${paddedSeq}`;
-    });
-  }
 
   return (
     <div className="max-w-2xl mx-auto font-mono">

@@ -286,7 +286,7 @@ export default function ReportsPage() {
                 <div className="ml-2 space-y-3">
                   {pay.orders.map(order => (
                     <div key={order.id} className="border-t border-dashed border-gray-300 pt-2">
-                      <p className="text-[9px] font-bold text-gray-600 mb-1">ORDER ID: {order.id.slice(-6).toUpperCase()} ({order.status})</p>
+                      <p className="text-[9px] font-bold text-gray-600 mb-1">ORDER ID: {order.orderNumber || order.id.slice(-6).toUpperCase()} ({order.status})</p>
                       <ul className="text-[10px] space-y-1">
                         {order.items?.map((item, i) => (
                           <li key={i} className="flex justify-between">
