@@ -4,38 +4,36 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export function SplashScreen() {
-  const [mounted, setMounted] = useState(false);
-  const [show, setShow] = useState(false);
+  const [splashState, setSplashState] = useState<"loading" | "show" | "hide">("loading");
 
   useEffect(() => {
-    setMounted(true);
-    
     // Check if we've already shown the splash screen in this session
     const hasSeenSplash = sessionStorage.getItem("hasSeenSplash");
     if (hasSeenSplash) {
-      setShow(false);
+      setSplashState("hide");
       return;
     }
 
     // It hasn't been seen, so let's show it!
-    setShow(true);
+    setSplashState("show");
 
     // Hide splash screen after typing animation completes and rests
     const timer = setTimeout(() => {
-      setShow(false);
+      setSplashState("hide");
       sessionStorage.setItem("hasSeenSplash", "true");
     }, 2800); // 2.8s total duration before fading out
 
     return () => clearTimeout(timer);
   }, []);
 
-  if (!mounted) return null;
-
   const text = "don't miss this saturday";
 
   return (
     <AnimatePresence>
-      {show && (
+      {splashState === "loading" && (
+        <div className="fixed inset-0 z-[100] bg-white pointer-events-none" />
+      )}
+      {splashState === "show" && (
         <motion.div
           key="splash"
           initial={{ opacity: 1 }}
