@@ -56,10 +56,33 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
     setTimeout(() => setAddedItemId(null), 600);
   };
 
+  // Sort categories by displayOrder
+  const sortedCategories = [...categories].sort(
+    (a, b) => (a.displayOrder || 999) - (b.displayOrder || 999)
+  );
+
   const filteredItems =
     activeCategory === "all"
-      ? items
-      : items.filter((item) => item.categoryId === activeCategory);
+      ? [...items].sort((a, b) => {
+          const catA = sortedCategories.find((c) => c.id === a.categoryId);
+          const catB = sortedCategories.find((c) => c.id === b.categoryId);
+          const catOrderA = catA?.displayOrder || 999;
+          const catOrderB = catB?.displayOrder || 999;
+          
+          if (catOrderA !== catOrderB) return catOrderA - catOrderB;
+          return (a.displayOrder || 999) - (b.displayOrder || 999);
+        })
+      : [...items]
+          .filter((item) => item.categoryId === activeCategory)
+          .sort((a, b) => (a.displayOrder || 999) - (b.displayOrder || 999));
+
+  const getIsAvailable = (item: MenuItem) => {
+    if (!item.isAvailable) return false;
+    if (item.hasStockTracking) {
+      return item.stock !== undefined && item.stock > 0;
+    }
+    return true;
+  };
 
   const cartCount = getItemCount();
 
@@ -98,7 +121,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
             >
               [ALL ITEMS]
             </button>
-            {categories.map((category) => (
+            {sortedCategories.map((category) => (
               <button
                 key={category.id}
                 onClick={() => setActiveCategory(category.id)}
@@ -149,7 +172,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
             >
               <div className="flex items-start gap-3">
                 {/* Item Image */}
-                {item.imageUrl ? (
+                {item.imageUrl && (
                   <div className="relative w-20 h-20 shrink-0 border-2 border-black">
                     <Image
                       src={item.imageUrl}
@@ -160,16 +183,12 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
                       unoptimized
                     />
                   </div>
-                ) : (
-                  <div className="w-20 h-20 shrink-0 border-2 border-dashed border-gray-400 bg-gray-50 flex items-center justify-center">
-                    <span className="text-xs text-gray-400">NO IMAGE</span>
-                  </div>
                 )}
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 mb-1">
                     <h3 className="text-sm font-bold uppercase">{item.name}</h3>
-                    {!item.isAvailable && (
+                    {!getIsAvailable(item) && (
                       <span className="text-xs bg-black text-white px-2 py-0.5">
                         SOLD OUT
                       </span>
@@ -189,10 +208,10 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
 
                     <button
                       onClick={() => handleAddToCart(item)}
-                      disabled={!item.isAvailable}
+                      disabled={!getIsAvailable(item)}
                       className={`px-4 py-2 text-xs font-bold border-2 border-black transition-all ${addedItemId === item.id
                         ? "bg-green-600 text-white border-green-600"
-                        : item.isAvailable
+                        : getIsAvailable(item)
                           ? "bg-black text-white hover:bg-gray-800"
                           : "bg-gray-300 text-gray-500 border-gray-300 cursor-not-allowed"
                         }`}

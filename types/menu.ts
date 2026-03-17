@@ -32,6 +32,8 @@ export type MenuItem = {
   isAvailable: boolean;
   displayOrder: number;
   isPopular?: boolean;
+  hasStockTracking?: boolean;
+  stock?: number;
   tags?: string[];
   prepStation?: 'HOT_KITCHEN' | 'COLD_KITCHEN' | 'DRINK' | 'DESSERT' | 'GENERAL';
   targetPrepMinutes?: number;
@@ -86,6 +88,8 @@ export type CreateMenuItemInput = {
   isAvailable?: boolean;
   displayOrder?: number;
   isPopular?: boolean;
+  hasStockTracking?: boolean;
+  stock?: number;
   tags?: string[];
   modifiers?: ModifierGroup[];
   recipe?: RecipeIngredient[];

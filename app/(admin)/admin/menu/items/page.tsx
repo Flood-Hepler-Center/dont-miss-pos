@@ -25,6 +25,8 @@ export default function MenuItemsPage() {
     costPrice: 0,
     categoryId: '',
     isAvailable: true,
+    hasStockTracking: false,
+    stock: 0,
     imageUrl: '',
     modifiers: [],
   });
@@ -92,6 +94,8 @@ export default function MenuItemsPage() {
       costPrice: 0,
       categoryId: categories[0]?.id || '',
       isAvailable: true,
+      hasStockTracking: false,
+      stock: 0,
       imageUrl: '',
       modifiers: [],
     });
@@ -108,6 +112,8 @@ export default function MenuItemsPage() {
       costPrice: item.costPrice || 0,
       categoryId: item.categoryId,
       isAvailable: item.isAvailable,
+      hasStockTracking: item.hasStockTracking || false,
+      stock: item.stock || 0,
       imageUrl: item.imageUrl || '',
       modifiers: item.modifiers || [],
     });
@@ -137,7 +143,7 @@ export default function MenuItemsPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name?.trim() || !formData.categoryId) return;
-    
+
     setLoading(true);
     try {
       if (editingItem) {
@@ -146,7 +152,7 @@ export default function MenuItemsPage() {
         await menuService.createItem(formData);
       }
       setModalVisible(false);
-      setFormData({ name: '', description: '', price: 0, costPrice: 0, categoryId: '', isAvailable: true, imageUrl: '', modifiers: [] });
+      setFormData({ name: '', description: '', price: 0, costPrice: 0, categoryId: '', isAvailable: true, hasStockTracking: false, stock: 0, imageUrl: '', modifiers: [] });
       setImagePreview('');
     } catch (error) {
       console.error('Failed to save item:', error);
@@ -212,8 +218,8 @@ export default function MenuItemsPage() {
           <div className="divide-y-2 divide-black max-h-[600px] overflow-y-auto">
             {filteredItems.map((item) => {
               const cat = categories.find(c => c.id === item.categoryId);
-              const margin = item.costPrice && item.price 
-                ? ((item.price - item.costPrice) / item.price * 100).toFixed(1) 
+              const margin = item.costPrice && item.price
+                ? ((item.price - item.costPrice) / item.price * 100).toFixed(1)
                 : null;
               return (
                 <div key={item.id} className="p-3 hover:bg-gray-50">
@@ -221,10 +227,10 @@ export default function MenuItemsPage() {
                     <div>
                       {item.imageUrl ? (
                         <div className="relative w-12 h-12">
-                          <Image 
-                            src={item.imageUrl} 
-                            alt={item.name} 
-                            fill 
+                          <Image
+                            src={item.imageUrl}
+                            alt={item.name}
+                            fill
                             className="object-cover border border-black"
                             unoptimized
                           />
@@ -244,13 +250,18 @@ export default function MenuItemsPage() {
                       <span className={`px-2 py-1 border-2 border-black text-xs ${item.isAvailable ? '' : 'bg-red-50'}`}>
                         {item.isAvailable ? 'AVAILABLE' : "86'D"}
                       </span>
+                      {item.hasStockTracking && (
+                        <div className="mt-1 text-xs font-bold text-gray-700">
+                          STOCK: {item.stock}
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleToggle86(item.id, item.isAvailable)}
                         className="px-2 py-1 border border-black text-xs hover:bg-gray-100"
                       >
-                        {item.isAvailable ? '[86]' : '[ON]'}
+                        {item.isAvailable ? '[OFF]' : '[ON]'}
                       </button>
                       <button
                         onClick={() => handleEdit(item)}
@@ -286,10 +297,10 @@ export default function MenuItemsPage() {
                 <div className="flex gap-3 mb-3">
                   {item.imageUrl ? (
                     <div className="relative w-16 h-16 shrink-0">
-                      <Image 
-                        src={item.imageUrl} 
-                        alt={item.name} 
-                        fill 
+                      <Image
+                        src={item.imageUrl}
+                        alt={item.name}
+                        fill
                         className="object-cover border border-black"
                         unoptimized
                       />
@@ -302,16 +313,23 @@ export default function MenuItemsPage() {
                     <p className="text-xs text-gray-600">{cat?.name}</p>
                     <p className="text-sm font-bold mt-1">฿{item.price.toFixed(2)}</p>
                   </div>
-                  <span className={`px-2 py-1 border-2 border-black text-xs h-fit ${item.isAvailable ? '' : 'bg-red-50'}`}>
-                    {item.isAvailable ? 'ON' : "86"}
-                  </span>
+                  <div className="flex flex-col gap-1 items-end">
+                    <span className={`px-2 py-1 border-2 border-black text-xs h-fit ${item.isAvailable ? '' : 'bg-red-50'}`}>
+                      {item.isAvailable ? 'ON' : "86"}
+                    </span>
+                    {item.hasStockTracking && (
+                      <span className="text-xs font-bold text-gray-700">
+                        STOCK: {item.stock}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={() => handleToggle86(item.id, item.isAvailable)}
                     className="px-3 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
                   >
-                    {item.isAvailable ? '[86]' : '[ON]'}
+                    {item.isAvailable ? '[OFF]' : '[ON]'}
                   </button>
                   <button
                     onClick={() => handleEdit(item)}
@@ -405,10 +423,10 @@ export default function MenuItemsPage() {
                     {imagePreview ? (
                       <div className="space-y-2">
                         <div className="relative w-full h-32">
-                          <Image 
-                            src={imagePreview} 
-                            alt="Preview" 
-                            fill 
+                          <Image
+                            src={imagePreview}
+                            alt="Preview"
+                            fill
                             className="object-cover border border-black"
                             unoptimized
                           />
@@ -432,41 +450,93 @@ export default function MenuItemsPage() {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              if (file.size > 1024 * 1024) {
-                                alert('Image must be less than 1MB');
+                              if (file.size > 10 * 1024 * 1024) {
+                                alert('Image must be less than 10MB');
                                 return;
                               }
                               const reader = new FileReader();
-                              reader.onloadend = () => {
-                                const base64 = reader.result as string;
-                                setImagePreview(base64);
-                                setFormData({ ...formData, imageUrl: base64 });
+                              reader.onload = (e) => {
+                                const img = document.createElement('img');
+                                img.onload = () => {
+                                  const canvas = document.createElement('canvas');
+                                  let width = img.width;
+                                  let height = img.height;
+                                  
+                                  const MAX_SIZE = 800; // Resize to max 800px
+                                  if (width > height) {
+                                    if (width > MAX_SIZE) {
+                                      height *= MAX_SIZE / width;
+                                      width = MAX_SIZE;
+                                    }
+                                  } else {
+                                    if (height > MAX_SIZE) {
+                                      width *= MAX_SIZE / height;
+                                      height = MAX_SIZE;
+                                    }
+                                  }
+                                  
+                                  canvas.width = width;
+                                  canvas.height = height;
+                                  const ctx = canvas.getContext('2d');
+                                  ctx?.drawImage(img, 0, 0, width, height);
+                                  
+                                  // Compress to WebP at 0.8 quality
+                                  const base64 = canvas.toDataURL('image/webp', 0.8);
+                                  setImagePreview(base64);
+                                  setFormData({ ...formData, imageUrl: base64 });
+                                };
+                                img.src = e.target?.result as string;
                               };
                               reader.readAsDataURL(file);
                             }
                           }}
                           className="text-xs"
                         />
-                        <p className="text-xs text-gray-600 mt-2">Max 1MB • JPG, PNG, GIF</p>
+                        <p className="text-xs text-gray-600 mt-2">Max 10MB • JPG, PNG, GIF</p>
                       </div>
                     )}
                   </div>
                 </div>
-                
+
                 <ModifierManager
                   modifiers={formData.modifiers || []}
                   onChange={(modifiers) => setFormData({ ...formData, modifiers })}
                 />
 
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={formData.isAvailable}
-                    onChange={(e) => setFormData({ ...formData, isAvailable: e.target.checked })}
-                    className="w-4 h-4 border-2 border-black"
-                  />
-                  <label className="text-xs font-bold">AVAILABLE</label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={formData.isAvailable}
+                      onChange={(e) => setFormData({ ...formData, isAvailable: e.target.checked })}
+                      className="w-4 h-4 border-2 border-black"
+                    />
+                    <label className="text-xs font-bold">AVAILABLE</label>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={formData.hasStockTracking}
+                      onChange={(e) => setFormData({ ...formData, hasStockTracking: e.target.checked })}
+                      className="w-4 h-4 border-2 border-black"
+                    />
+                    <label className="text-xs font-bold">TRACK STOCK</label>
+                  </div>
                 </div>
+
+                {formData.hasStockTracking && (
+                  <div>
+                    <label className="block text-xs font-bold mb-2">CURRENT STOCK</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={formData.stock || 0}
+                      onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
+                      required
+                    />
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3 pt-4 border-t-2 border-black">
                   <button
                     type="button"

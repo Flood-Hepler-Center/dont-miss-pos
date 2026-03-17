@@ -169,19 +169,39 @@ export default function RecipesPage() {
     }
   };
 
-  const checkAvailability = (recipe: Recipe): { available: boolean; missing: string[] } => {
+  const checkAvailability = (recipe: Recipe): { available: boolean; missing: string[]; maxServings: number } => {
     const missing: string[] = [];
-    let available = true;
+    let maxServings = Infinity;
+    const recipeYield = recipe.yield || 1;
+
+    if (!recipe.ingredients || recipe.ingredients.length === 0) {
+      return { available: false, missing: ['No ingredients defined'], maxServings: 0 };
+    }
 
     recipe.ingredients.forEach((ingredient) => {
       const invItem = inventoryItems.find((i) => i.id === ingredient.inventoryItemId);
-      if (!invItem || invItem.currentStock < ingredient.quantity) {
-        available = false;
+      const quantityPerServing = ingredient.quantity / recipeYield;
+      
+      if (!invItem) {
         missing.push(ingredient.inventoryItemName);
+        maxServings = 0;
+        return;
+      }
+
+      if (quantityPerServing > 0) {
+        const possibleServings = Math.floor(invItem.currentStock / quantityPerServing);
+        if (possibleServings < 1) {
+          missing.push(ingredient.inventoryItemName);
+        }
+        if (possibleServings < maxServings) {
+          maxServings = possibleServings;
+        }
       }
     });
 
-    return { available, missing };
+    if (maxServings === Infinity) maxServings = 0;
+
+    return { available: maxServings >= 1, missing, maxServings };
   };
 
   return (
@@ -214,13 +234,16 @@ export default function RecipesPage() {
               <div>MENU ITEM</div>
               <div>INGREDIENTS</div>
               <div>INVENTORY STATUS</div>
-              <div className="text-center">AVAILABLE</div>
+              <div className="text-center flex flex-col justify-center leading-tight">
+                <span>AVAILABLE</span>
+                <span className="text-[10px] text-gray-500">(SERVINGS)</span>
+              </div>
               <div className="text-center">ACTIONS</div>
             </div>
           </div>
           <div className="divide-y-2 divide-black">
             {recipes.map((recipe) => {
-              const { available, missing } = checkAvailability(recipe);
+              const { available, missing, maxServings } = checkAvailability(recipe);
               return (
                 <div key={recipe.id} className="p-3 hover:bg-gray-50">
                   <div className="grid grid-cols-5 gap-4 text-sm items-center">
@@ -239,13 +262,16 @@ export default function RecipesPage() {
                         <span className="text-green-600">All Available</span>
                       )}
                     </div>
-                    <div className="text-center">
+                    <div className="text-center flex flex-col items-center justify-center gap-1">
                       <span
                         className={`px-2 py-1 border-2 border-black text-xs ${
                           available ? 'bg-green-100' : 'bg-red-100'
                         }`}
                       >
                         {available ? '✓' : '✗'}
+                      </span>
+                      <span className="text-[10px] font-bold text-gray-700 bg-gray-100 px-1 py-0.5 rounded">
+                        {maxServings} SERVES
                       </span>
                     </div>
                     <div className="flex gap-2 justify-center">
@@ -272,18 +298,18 @@ export default function RecipesPage() {
         {/* Recipes List - Mobile */}
         <div className="md:hidden space-y-3">
           {recipes.map((recipe) => {
-            const { available, missing } = checkAvailability(recipe);
+            const { available, missing, maxServings } = checkAvailability(recipe);
             return (
               <div key={recipe.id} className="border-2 border-black p-4">
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <p className="font-bold text-sm">{recipe.menuItemName}</p>
                     <span
-                      className={`inline-block mt-1 px-2 py-1 border-2 border-black text-xs ${
+                      className={`inline-block mt-1 px-2 py-1 border-2 border-black text-[10px] font-bold ${
                         available ? 'bg-green-100' : 'bg-red-100'
                       }`}
                     >
-                      {available ? '✓ AVAILABLE' : '✗ UNAVAILABLE'}
+                      {available ? '✓ AVAILABLE' : '✗ UNAVAILABLE'} • {maxServings} SERVES
                     </span>
                   </div>
                 </div>

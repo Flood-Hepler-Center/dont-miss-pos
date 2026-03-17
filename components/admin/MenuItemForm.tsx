@@ -44,6 +44,7 @@ export function MenuItemForm({ item, categories, onSave, onCancel, loading }: Me
 
   const price = Form.useWatch('price', form);
   const costPrice = Form.useWatch('costPrice', form);
+  const hasStockTracking = Form.useWatch('hasStockTracking', form);
   const margin =
     price && costPrice ? (((price - costPrice) / price) * 100).toFixed(1) : '0';
 
@@ -51,7 +52,7 @@ export function MenuItemForm({ item, categories, onSave, onCancel, loading }: Me
     <Form
       form={form}
       layout="vertical"
-      initialValues={item || { isActive: true, isAvailable: true }}
+      initialValues={item || { isActive: true, isAvailable: true, hasStockTracking: false }}
       onFinish={handleSubmit}
     >
       <Form.Item
@@ -125,6 +126,22 @@ export function MenuItemForm({ item, categories, onSave, onCancel, loading }: Me
           </div>
         )}
       </Form.Item>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Form.Item name="hasStockTracking" label="Track Stock" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+
+        {hasStockTracking && (
+          <Form.Item
+            name="stock"
+            label="Current Stock"
+            rules={[{ required: true, message: 'Please enter stock amount' }]}
+          >
+            <InputNumber className="w-full" min={0} />
+          </Form.Item>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-4">
         <Form.Item name="isActive" label="Active" valuePropName="checked">

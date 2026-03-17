@@ -129,7 +129,32 @@ export const orderService = {
       const seqRef = doc(db, 'orderSequences', dateStr);
 
       const orderId = await runTransaction(db, async (transaction) => {
+        // --- 1. ALL READS ---
         const seqSnap = await transaction.get(seqRef);
+        
+        // Prepare arrays to hold item references and data for stock deduction
+        const itemRefsData: { ref: ReturnType<typeof doc>; newStock: number }[] = [];
+        
+        // Read all menu items to check stock
+        for (const item of input.items) {
+          if (item.menuItemId) {
+            const itemRef = doc(db, 'menuItems', item.menuItemId);
+            const itemSnap = await transaction.get(itemRef);
+            if (!itemSnap.exists()) {
+              throw new Error(`Menu item not found: ${item.name}`);
+            }
+            const itemData = itemSnap.data();
+            if (itemData.hasStockTracking) {
+              const currentStock = itemData.stock || 0;
+              if (currentStock < item.quantity) {
+                throw new Error(`Insufficient stock for ${item.name}. Only ${currentStock} left.`);
+              }
+              itemRefsData.push({ ref: itemRef, newStock: currentStock - item.quantity });
+            }
+          }
+        }
+
+        // --- 2. ALL WRITES ---
         let newSequence = 1;
 
         if (seqSnap.exists()) {
@@ -137,6 +162,14 @@ export const orderService = {
           transaction.update(seqRef, { lastSequence: newSequence, updatedAt: serverTimestamp() });
         } else {
           transaction.set(seqRef, { date: dateStr, lastSequence: newSequence, updatedAt: serverTimestamp() });
+        }
+        
+        // Update stock
+        for (const update of itemRefsData) {
+          transaction.update(update.ref, { 
+            stock: update.newStock, 
+            updatedAt: serverTimestamp() 
+          });
         }
 
         const orderNumber = `ORD-${dateStr}-${newSequence.toString().padStart(3, '0')}`;
