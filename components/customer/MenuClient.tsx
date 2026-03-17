@@ -8,6 +8,7 @@ import Image from "next/image";
 import type { MenuCategory, MenuItem, SelectedModifier } from "@/types";
 import { ItemModifierModal } from "./ItemModifierModal";
 import { CallStaffButton } from "./CallStaffButton";
+import { SplashScreen } from "./SplashScreen";
 
 interface MenuClientProps {
   tableId: string;
@@ -21,6 +22,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [addedItemId, setAddedItemId] = useState<string | null>(null);
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
+  const [actionModalOpen, setActionModalOpen] = useState(false);
 
   useEffect(() => {
     setTableId(tableId);
@@ -64,17 +66,17 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
   const filteredItems =
     activeCategory === "all"
       ? [...items].sort((a, b) => {
-          const catA = sortedCategories.find((c) => c.id === a.categoryId);
-          const catB = sortedCategories.find((c) => c.id === b.categoryId);
-          const catOrderA = catA?.displayOrder || 999;
-          const catOrderB = catB?.displayOrder || 999;
-          
-          if (catOrderA !== catOrderB) return catOrderA - catOrderB;
-          return (a.displayOrder || 999) - (b.displayOrder || 999);
-        })
+        const catA = sortedCategories.find((c) => c.id === a.categoryId);
+        const catB = sortedCategories.find((c) => c.id === b.categoryId);
+        const catOrderA = catA?.displayOrder || 999;
+        const catOrderB = catB?.displayOrder || 999;
+
+        if (catOrderA !== catOrderB) return catOrderA - catOrderB;
+        return (a.displayOrder || 999) - (b.displayOrder || 999);
+      })
       : [...items]
-          .filter((item) => item.categoryId === activeCategory)
-          .sort((a, b) => (a.displayOrder || 999) - (b.displayOrder || 999));
+        .filter((item) => item.categoryId === activeCategory)
+        .sort((a, b) => (a.displayOrder || 999) - (b.displayOrder || 999));
 
   const getIsAvailable = (item: MenuItem) => {
     if (!item.isAvailable) return false;
@@ -88,6 +90,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
 
   return (
     <div className="min-h-screen bg-white pb-24 font-sour-gummy">
+      <SplashScreen />
       {/* Receipt Header */}
       <div className="sticky top-0 z-20 bg-white border-b-2 border-black px-4 py-4">
         <div className="max-w-2xl mx-auto">
@@ -135,31 +138,6 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
             ))}
           </div>
         </div>
-
-        {/* Cart Button */}
-        <button
-          onClick={() => router.push("/cart")}
-          className="absolute top-4 right-4 p-2 bg-black text-white border-2 border-black hover:bg-gray-800 transition-all"
-          aria-label={`Cart with ${cartCount} items`}
-        >
-          <ShoppingCart size={20} />
-          {cartCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-black text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center border-2 border-white">
-              {cartCount}
-            </span>
-          )}
-        </button>
-
-        {/* Order History Button */}
-        <button
-          onClick={() => router.push("/order-history")}
-          className="absolute top-4 left-4 p-2 border-2 border-black bg-white hover:bg-gray-100 transition-all"
-          aria-label="Order History"
-        >
-          <span className="flex items-center gap-2 text-xs font-bold">
-            <Notebook size={16} />
-          </span>
-        </button>
       </div>
 
       {/* Menu Items - With Images */}
@@ -232,28 +210,75 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
         )}
       </div>
 
-      {/* Subtle Call Staff Actions - Bottom Left */}
-      <div className="fixed bottom-6 left-4 z-30 flex flex-col gap-1.5">
-        <CallStaffButton tableId={tableId} className="shadow-sm" />
-        <CallStaffButton
-          tableId={tableId}
-          callType="PAYMENT"
-          className="shadow-sm"
-        />
+      {/* Action Navigation (Left) */}
+      <div className="fixed bottom-6 left-4 sm:left-6 z-40">
+        <button
+          onClick={() => setActionModalOpen(true)}
+          className="bg-white text-black px-4 sm:px-5 py-3 border-2 border-black transition-transform flex items-center gap-2 text-xs sm:text-sm font-bold shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-[4px] active:translate-y-[4px]"
+        >
+          <div className="flex flex-col gap-1 w-4 justify-center">
+            <div className="w-full h-[2px] bg-black"></div>
+            <div className="w-full h-[2px] bg-black"></div>
+            <div className="w-full h-[2px] bg-black"></div>
+          </div>
+          ACTION
+        </button>
       </div>
 
-      {/* Floating Cart Button */}
-      <div className="fixed bottom-6 right-6">
-        {cartCount > 0 && (
+      {/* Floating Cart Button (Right) */}
+      {cartCount > 0 && (
+        <div className="fixed bottom-6 right-4 sm:right-6 z-40">
           <button
             onClick={() => router.push("/cart")}
-            className="bg-black text-white px-6 py-3 border-2 border-black shadow-lg hover:shadow-xl transition-all flex items-center gap-2 text-sm font-bold"
+            className="bg-black text-white px-5 sm:px-6 py-3 sm:py-4 border-2 border-black transition-transform flex items-center gap-2 sm:gap-3 text-xs sm:text-sm font-bold shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-[6px] active:translate-y-[6px]"
           >
             <ShoppingCart size={18} />
             VIEW CART ({cartCount})
           </button>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Action Modal Overlay */}
+      {actionModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white border-4 border-black w-full max-w-sm font-sour-gummy p-6 relative shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] animate-in fade-in zoom-in duration-200">
+            <button 
+              onClick={() => setActionModalOpen(false)}
+              className="absolute top-2 right-4 text-3xl hover:text-gray-600 transition-colors"
+            >
+              ×
+            </button>
+            
+            <div className="text-center mb-6 border-b-4 border-black pb-4 mt-2">
+              <h2 className="text-xl font-bold uppercase tracking-widest">
+                STORE ACTION
+              </h2>
+            </div>
+            
+            <div className="space-y-4">
+              <button 
+                onClick={() => { setActionModalOpen(false); router.push("/order-history"); }}
+                className="w-full bg-black text-white border-2 border-black p-4 text-center font-bold flex justify-center items-center gap-3 hover:bg-gray-800 transition-colors uppercase tracking-widest shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] active:shadow-none active:translate-x-1 active:translate-y-1"
+              >
+                <Notebook size={20} />
+                ORDER HISTORY
+              </button>
+
+              <div className="grid grid-cols-2 gap-4 pt-2">
+                <CallStaffButton 
+                  tableId={tableId} 
+                  className="!w-full !p-4 !h-auto !border-2 !border-black !bg-white !text-black hover:!bg-gray-100 !rounded-none !shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] active:!shadow-none active:translate-x-1 active:translate-y-1 uppercase tracking-widest flex-col gap-2" 
+                />
+                <CallStaffButton 
+                  tableId={tableId} 
+                  callType="PAYMENT" 
+                  className="!w-full !p-4 !h-auto !border-2 !border-black !bg-white !text-black hover:!bg-gray-100 !rounded-none !shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] active:!shadow-none active:translate-x-1 active:translate-y-1 uppercase tracking-widest flex-col gap-2" 
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modifier Selection Modal */}
       {modifierItem && (
