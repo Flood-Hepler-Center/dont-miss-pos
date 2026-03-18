@@ -103,6 +103,7 @@ export const orderService = {
         status: 'PLACED' as OrderStatus,
         entryMethod: input.entryMethod || 'QR',
         createdBy: input.createdBy || null,
+        placedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -258,10 +259,17 @@ export const orderService = {
         throw new Error(`Cannot transition from ${currentStatus} to ${newStatus}`);
       }
 
-      await updateDoc(orderRef, {
+      const updateData: Record<string, any> = {
         status: newStatus,
         updatedAt: serverTimestamp(),
-      });
+      };
+
+      if (newStatus === 'PREPARING') updateData.preparingAt = serverTimestamp();
+      if (newStatus === 'READY')     updateData.readyAt = serverTimestamp();
+      if (newStatus === 'SERVED')    updateData.servedAt = serverTimestamp();
+      if (newStatus === 'COMPLETED') updateData.completedAt = serverTimestamp();
+
+      await updateDoc(orderRef, updateData);
     } catch (error) {
       console.error('Error updating order status:', error);
       throw error;

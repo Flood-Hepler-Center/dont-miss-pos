@@ -148,7 +148,7 @@ export default function OrdersPage() {
               <div>ACTION</div>
             </div>
           </div>
-          
+
           <div className="divide-y-2 divide-black max-h-[600px] overflow-y-auto">
             {filteredOrders.length > 0 ? (
               filteredOrders.map((order) => (
@@ -157,9 +157,9 @@ export default function OrdersPage() {
                     <div className="font-bold">#{order.orderNumber || order.id.slice(-6).toUpperCase()}</div>
                     <div><OrderTypeBadge orderType={order.orderType || 'DINE_IN'} /></div>
                     <div>
-                      {order.orderType === 'TAKE_AWAY' 
+                      {order.orderType === 'TAKE_AWAY'
                         ? (order.customerName || 'Unknown')
-                        : order.tableId 
+                        : order.tableId
                           ? `TABLE ${order.tableId}`
                           : <span className="text-amber-600 font-bold">⚠️ NO TABLE</span>
                       }
@@ -208,7 +208,7 @@ export default function OrdersPage() {
                   <div>
                     <p className="text-sm font-bold">#{order.orderNumber || order.id.slice(-6).toUpperCase()}</p>
                     <p className="text-xs mt-1">
-                      {order.orderType === 'TAKE_AWAY' 
+                      {order.orderType === 'TAKE_AWAY'
                         ? (order.customerName || 'Unknown')
                         : `TABLE ${order.tableId || '-'}`
                       }
@@ -221,14 +221,14 @@ export default function OrdersPage() {
                     </span>
                   </div>
                 </div>
-                
+
                 <div className="border-t-2 border-dashed border-black pt-2 mb-3">
                   <div className="flex justify-between text-sm">
                     <span>{order.items?.length || 0} ITEMS</span>
                     <span className="font-bold">฿{order.total?.toFixed(2) || '0.00'}</span>
                   </div>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => {
@@ -270,7 +270,7 @@ export default function OrdersPage() {
                     <span className="text-xs">{selectedOrder.status}</span>
                   </div>
                   <p className="text-xs">
-                    {selectedOrder.orderType === 'TAKE_AWAY' 
+                    {selectedOrder.orderType === 'TAKE_AWAY'
                       ? (selectedOrder.customerName || 'Unknown')
                       : `TABLE ${selectedOrder.tableId || '-'}`
                     }
@@ -294,7 +294,7 @@ export default function OrdersPage() {
                               {item.modifiers.map((mod, modIdx) => (
                                 <div key={modIdx}>
                                   → {mod.optionName}
-                                  {mod.priceMode === 'absolute' && mod.absolutePrice ? 
+                                  {mod.priceMode === 'absolute' && mod.absolutePrice ?
                                     ` (฿${mod.absolutePrice.toFixed(2)})` :
                                     mod.priceAdjustment !== 0 ? ` (+฿${mod.priceAdjustment.toFixed(2)})` : ''
                                   }

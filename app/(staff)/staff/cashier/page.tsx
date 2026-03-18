@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { onSnapshot, doc } from 'firebase/firestore';
+import { onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { TableSelector } from '@/components/cashier/TableSelector';
 import { NoTableOrderSelector } from '@/components/cashier/NoTableOrderSelector';
@@ -34,6 +34,31 @@ export default function CashierPage() {
   const [billCalculation, setBillCalculation] = useState<BillCalculation | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(null);
   const [paymentData, setPaymentData] = useState<Payment | null>(null);
+  const [customerSegment, setCustomerSegment] = useState<string | null>(null);
+  const [segmentSaved, setSegmentSaved] = useState(false);
+
+  // Customer segments for tagging — used for future analytics / CRM segmentation
+  const SEGMENTS = [
+    { value: 'NEW',      emoji: '🆕', label: 'New' },
+    { value: 'REGULAR',  emoji: '🔄', label: 'Regular' },
+    { value: 'FRIEND',   emoji: '👥', label: 'Friend' },
+    { value: 'BUSINESS', emoji: '💼', label: 'Business' },
+    { value: 'EVENT',    emoji: '🎊', label: 'Event' },
+    { value: 'VIP',      emoji: '⭐', label: 'VIP' },
+  ];
+
+  const handleSegmentSelect = async (value: string) => {
+    setCustomerSegment(value);
+    setSegmentSaved(false);
+    try {
+      if (paymentData?.id) {
+        await updateDoc(doc(db, 'payments', paymentData.id), { customerSegment: value });
+      }
+      setSegmentSaved(true);
+    } catch (err) {
+      console.error('Failed to save customer segment:', err);
+    }
+  };
 
   const handleTableSelect = (table: Table, tableOrders: Order[]) => {
     setSelectedTable(table);
@@ -68,6 +93,8 @@ export default function CashierPage() {
     setBillCalculation(null);
     setPaymentMethod(null);
     setPaymentData(null);
+    setCustomerSegment(null);
+    setSegmentSaved(false);
   };
 
   // Real-time sync: refresh table/orders when changes occur from other pages
@@ -190,8 +217,39 @@ export default function CashierPage() {
         {step === 'complete' && paymentData && (
           <div className="space-y-6 pb-12">
             <Receipt payment={paymentData} orders={orders} />
-            <div className="flex justify-center mt-6">
-              <button 
+
+            {/* ── Customer Segment Picker ─────────────────────────────────── */}
+            {/* Staff tags the customer type for CRM/analytics — completely optional */}
+            <div className="border-2 border-black p-4">
+              <div className="text-center mb-3">
+                <p className="text-sm font-bold">TAG THIS CUSTOMER</p>
+                <p className="text-xs text-gray-500">Optional · helps us understand who visits us</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {SEGMENTS.map((seg) => (
+                  <button
+                    key={seg.value}
+                    onClick={() => handleSegmentSelect(seg.value)}
+                    className={`flex flex-col items-center gap-1 py-3 border-2 text-sm font-bold transition-all ${
+                      customerSegment === seg.value
+                        ? 'border-black bg-black text-white'
+                        : 'border-gray-300 bg-white text-black hover:border-black hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className="text-xl">{seg.emoji}</span>
+                    <span className="text-xs">{seg.label}</span>
+                  </button>
+                ))}
+              </div>
+              {segmentSaved && (
+                <p className="text-center text-xs text-green-700 font-bold mt-3">
+                  ✓ Saved — {SEGMENTS.find((s) => s.value === customerSegment)?.emoji} {customerSegment}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-center mt-2">
+              <button
                 onClick={handleNewTransaction}
                 className="bg-black text-white px-8 py-4 font-bold border-2 border-black hover:bg-gray-800 hover:text-white transition-all shadow-md"
               >

@@ -56,17 +56,15 @@ export default function LoginPage() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => setRole('STAFF')}
-                className={`px-6 py-3 border-2 border-black font-bold text-sm transition-colors ${
-                  role === 'STAFF' ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'
-                }`}
+                className={`px-6 py-3 border-2 border-black font-bold text-sm transition-colors ${role === 'STAFF' ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'
+                  }`}
               >
                 [STAFF]
               </button>
               <button
                 onClick={() => setRole('ADMIN')}
-                className={`px-6 py-3 border-2 border-black font-bold text-sm transition-colors ${
-                  role === 'ADMIN' ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'
-                }`}
+                className={`px-6 py-3 border-2 border-black font-bold text-sm transition-colors ${role === 'ADMIN' ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'
+                  }`}
               >
                 [ADMIN]
               </button>
@@ -96,12 +94,6 @@ export default function LoginPage() {
           >
             {loading ? '[LOGGING IN...]' : '[LOGIN]'}
           </button>
-
-          {/* Info */}
-          <div className="text-center border-t-2 border-dashed border-black pt-4">
-            <p className="text-xs text-gray-600">DEFAULT PIN: 1234</p>
-            <p className="text-xs text-gray-600">(WORKS FOR BOTH ROLES)</p>
-          </div>
         </div>
       </div>
     </div>

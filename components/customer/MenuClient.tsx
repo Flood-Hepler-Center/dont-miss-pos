@@ -221,7 +221,6 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
             <div className="w-full h-[2px] bg-black"></div>
             <div className="w-full h-[2px] bg-black"></div>
           </div>
-          ACTION
         </button>
       </div>
 
@@ -242,21 +241,21 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
       {actionModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4">
           <div className="bg-white border-4 border-black w-full max-w-sm font-sour-gummy p-6 relative shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] animate-in fade-in zoom-in duration-200">
-            <button 
+            <button
               onClick={() => setActionModalOpen(false)}
               className="absolute top-2 right-4 text-3xl hover:text-gray-600 transition-colors"
             >
               ×
             </button>
-            
+
             <div className="text-center mb-6 border-b-4 border-black pb-4 mt-2">
               <h2 className="text-xl font-bold uppercase tracking-widest">
                 STORE ACTION
               </h2>
             </div>
-            
+
             <div className="space-y-4">
-              <button 
+              <button
                 onClick={() => { setActionModalOpen(false); router.push("/order-history"); }}
                 className="w-full bg-black text-white border-2 border-black p-4 text-center font-bold flex justify-center items-center gap-3 hover:bg-gray-800 transition-colors uppercase tracking-widest shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] active:shadow-none active:translate-x-1 active:translate-y-1"
               >
@@ -265,14 +264,14 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
               </button>
 
               <div className="grid grid-cols-2 gap-4 pt-2">
-                <CallStaffButton 
-                  tableId={tableId} 
-                  className="!w-full !p-4 !h-auto !border-2 !border-black !bg-white !text-black hover:!bg-gray-100 !rounded-none !shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] active:!shadow-none active:translate-x-1 active:translate-y-1 uppercase tracking-widest flex-col gap-2" 
+                <CallStaffButton
+                  tableId={tableId}
+                  className="!w-full !p-4 !h-auto !border-2 !border-black !bg-white !text-black hover:!bg-gray-100 !rounded-none !shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] active:!shadow-none active:translate-x-1 active:translate-y-1 uppercase tracking-widest flex-col gap-2"
                 />
-                <CallStaffButton 
-                  tableId={tableId} 
-                  callType="PAYMENT" 
-                  className="!w-full !p-4 !h-auto !border-2 !border-black !bg-white !text-black hover:!bg-gray-100 !rounded-none !shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] active:!shadow-none active:translate-x-1 active:translate-y-1 uppercase tracking-widest flex-col gap-2" 
+                <CallStaffButton
+                  tableId={tableId}
+                  callType="PAYMENT"
+                  className="!w-full !p-4 !h-auto !border-2 !border-black !bg-white !text-black hover:!bg-gray-100 !rounded-none !shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] active:!shadow-none active:translate-x-1 active:translate-y-1 uppercase tracking-widest flex-col gap-2"
                 />
               </div>
             </div>

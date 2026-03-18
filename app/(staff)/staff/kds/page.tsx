@@ -26,280 +26,244 @@ type SmartBatch = {
 
 const DEFAULT_TARGET_PREP_MINUTES = 10;
 
+type StatusDef = {
+  colBorder: string;
+  hdrBg: string;
+  hdrText: string;
+  actionBg: string;
+  label: string;
+  action: string;
+  emptyMsg: string;
+};
+
+// ─── Color Design Decision ──────────────────────────────────────────────────
+// Research (qsrautomations.com, oracle.com, lightspeedhq.com, clearpointstrategy.com):
+// Industry-standard KDS uses the "traffic light" principle exclusively — 3 colors only.
+// All status meaning is carried by Red / Amber / Green. Everything else is neutral dark.
+// This prevents color overload and lets chefs read the screen in < 1 second.
+//
+//  RED #EF4444    → NEW / URGENT (needs action now)
+//  AMBER #F59E0B  → COOKING (in progress, monitor)
+//  GREEN #22C55E  → READY (done, pick up)
+//  DARK #1C1C1C   → all surfaces / cards / sections (neutral)
+//  #121212        → page background (Material Design dark mode spec)
+
+const STATUS = {
+  placed: {
+    colBorder: 'border-l-red-500',
+    hdrBg:     'bg-red-600',
+    hdrText:   'text-white',
+    actionBg:  'bg-red-600 hover:bg-red-500',
+    label:     '🔴  NEW ORDERS',
+    action:    '▶  TAP TO START',
+    emptyMsg:  'NO NEW ORDERS',
+  },
+  preparing: {
+    colBorder: 'border-l-amber-400',
+    hdrBg:     'bg-amber-600',
+    hdrText:   'text-white',
+    actionBg:  'bg-amber-600 hover:bg-amber-500',
+    label:     '🟡  COOKING',
+    action:    '✓  TAP WHEN DONE',
+    emptyMsg:  'NOTHING COOKING',
+  },
+  ready: {
+    colBorder: 'border-l-green-500',
+    hdrBg:     'bg-green-600',
+    hdrText:   'text-white',
+    actionBg:  'bg-green-600 hover:bg-green-500',
+    label:     '🟢  READY',
+    action:    '🔔  TAP TO SERVE',
+    emptyMsg:  'NOTHING READY',
+  },
+} as const;
+
+// ─── Live Clock ──────────────────────────────────────────────────────────────
+function LiveClock() {
+  const [time, setTime] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return <span className="text-3xl font-black text-white">{format(time, 'HH:mm:ss')}</span>;
+}
+
+// ─── Elapsed Timer ───────────────────────────────────────────────────────────
+// Thresholds per industry KDS standard (qsrautomations.com):
+//   0–4 min  → green  (on schedule)
+//   5–9 min  → amber  (approaching limit)
+//   10+ min  → red pulsing (overdue — must act)
+function ElapsedTimer({ since }: { since: Date }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const calc = () => Math.floor((Date.now() - since.getTime()) / 1000);
+    setElapsed(calc());
+    const id = setInterval(() => setElapsed(calc()), 1000);
+    return () => clearInterval(id);
+  }, [since]);
+
+  const min = Math.floor(elapsed / 60);
+  const sec = elapsed % 60;
+  const label = `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+
+  if (min >= 10)
+    return <span className="px-3 py-1 rounded-lg text-base font-black text-white bg-red-600 animate-pulse">⏱ {label}</span>;
+  if (min >= 5)
+    return <span className="px-3 py-1 rounded-lg text-base font-black text-black bg-amber-400">⏱ {label}</span>;
+  return <span className="px-3 py-1 rounded-lg text-base font-black text-black bg-green-400">⏱ {label}</span>;
+}
+
+// ─── Priority Bar ────────────────────────────────────────────────────────────
+function PriorityBar({ score }: { score: number }) {
+  const pct = Math.min(100, Math.round(score * 20));
+  const bar = pct >= 70 ? 'bg-red-500' : pct >= 40 ? 'bg-amber-400' : 'bg-green-500';
+  return (
+    <div className="mt-2 h-1.5 bg-neutral-700 rounded-full overflow-hidden">
+      <div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function KDSPage() {
-  const [placedOrders, setPlacedOrders] = useState<Order[]>([]);
+  const [placedOrders, setPlacedOrders]       = useState<Order[]>([]);
   const [preparingOrders, setPreparingOrders] = useState<Order[]>([]);
-  const [readyOrders, setReadyOrders] = useState<Order[]>([]);
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [readyOrders, setReadyOrders]         = useState<Order[]>([]);
+  const [menuItems, setMenuItems]             = useState<MenuItem[]>([]);
 
   useEffect(() => {
-    const placedQuery = query(
-      collection(db, 'orders'),
-      where('status', '==', 'PLACED')
-    );
-
-    const unsubscribe = onSnapshot(
-      placedQuery,
-      (snapshot) => {
-        const orders = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as Order[];
-        setPlacedOrders(orders);
-      }
-    );
-
-    return () => unsubscribe();
+    const q = query(collection(db, 'orders'), where('status', '==', 'PLACED'));
+    return onSnapshot(q, (s) => setPlacedOrders(s.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]));
   }, []);
 
   useEffect(() => {
-    const preparingQuery = query(
-      collection(db, 'orders'),
-      where('status', '==', 'PREPARING')
-    );
-
-    const unsubscribe = onSnapshot(
-      preparingQuery,
-      (snapshot) => {
-        const orders = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as Order[];
-        setPreparingOrders(orders);
-      }
-    );
-
-    return () => unsubscribe();
+    const q = query(collection(db, 'orders'), where('status', '==', 'PREPARING'));
+    return onSnapshot(q, (s) => setPreparingOrders(s.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]));
   }, []);
 
   useEffect(() => {
-    const readyQuery = query(
-      collection(db, 'orders'),
-      where('status', '==', 'READY')
-    );
-
-    const unsubscribe = onSnapshot(
-      readyQuery,
-      (snapshot) => {
-        const orders = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as Order[];
-        setReadyOrders(orders);
-      }
-    );
-
-    return () => unsubscribe();
+    const q = query(collection(db, 'orders'), where('status', '==', 'READY'));
+    return onSnapshot(q, (s) => setReadyOrders(s.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]));
   }, []);
 
-  useEffect(() => {
-    const fetchMenuItems = async () => {
-      const items = await menuService.getActiveItems();
-      setMenuItems(items);
-    };
+  useEffect(() => { menuService.getActiveItems().then(setMenuItems); }, []);
 
-    fetchMenuItems();
-  }, []);
-
-  const menuItemMap = useMemo(() => {
-    return menuItems.reduce<Record<string, MenuItem>>((acc, item) => {
-      acc[item.id] = item;
-      return acc;
-    }, {});
-  }, [menuItems]);
+  const menuItemMap = useMemo(
+    () => menuItems.reduce<Record<string, MenuItem>>((acc, m) => { acc[m.id] = m; return acc; }, {}),
+    [menuItems],
+  );
 
   const getOrderDate = (date: unknown): Date => {
-    if (date instanceof Date) {
-      return date;
-    }
-    if (
-      typeof date === 'object' &&
-      date !== null &&
-      'seconds' in date &&
-      typeof (date as Timestamp).seconds === 'number'
-    ) {
+    if (date instanceof Date) return date;
+    if (typeof date === 'object' && date !== null && 'seconds' in date &&
+        typeof (date as Timestamp).seconds === 'number')
       return new Date((date as Timestamp).seconds * 1000);
-    }
     return new Date();
   };
 
   const getStation = (item: OrderItem): string => {
-    const menuItem = menuItemMap[item.menuItemId];
-    if (menuItem?.prepStation) {
-      return menuItem.prepStation.replace('_', ' ');
-    }
-
-    const itemName = item.name.toLowerCase();
-    if (itemName.includes('coffee') || itemName.includes('tea') || itemName.includes('latte')) {
-      return 'DRINK';
-    }
-    if (itemName.includes('cake') || itemName.includes('dessert') || itemName.includes('ice cream')) {
-      return 'DESSERT';
-    }
-    if (itemName.includes('salad') || itemName.includes('cold')) {
-      return 'COLD KITCHEN';
-    }
+    const mi = menuItemMap[item.menuItemId];
+    if (mi?.prepStation) return mi.prepStation.replace('_', ' ');
+    const n = item.name.toLowerCase();
+    if (n.includes('coffee') || n.includes('tea') || n.includes('latte') || n.includes('juice')) return 'DRINK';
+    if (n.includes('cake') || n.includes('dessert') || n.includes('ice cream')) return 'DESSERT';
+    if (n.includes('salad') || n.includes('cold') || n.includes('sushi')) return 'COLD KITCHEN';
     return 'HOT KITCHEN';
   };
 
   const getModifierSignature = (item: OrderItem): string => {
-    if (!item.modifiers || item.modifiers.length === 0) {
-      return 'STANDARD';
-    }
-    return item.modifiers
-      .map((mod) => `${mod.modifierGroupName}:${mod.optionName}`)
-      .sort()
-      .join(' | ');
+    if (!item.modifiers || item.modifiers.length === 0) return 'STANDARD';
+    return item.modifiers.map((m) => `${m.modifierGroupName}:${m.optionName}`).sort().join(' | ');
   };
 
-  const smartBatches = useMemo((): SmartBatch[] => {
-    const activeCookingOrders = [...placedOrders, ...preparingOrders];
+  const smartBatches = useMemo(() => {
+    const active = [...placedOrders, ...preparingOrders];
     const grouped = new Map<string, SmartBatch>();
-
-    activeCookingOrders.forEach((order) => {
+    active.forEach((order) => {
       const orderDate = getOrderDate(order.createdAt);
       const oldestMinutes = Math.max(0, Math.floor((Date.now() - orderDate.getTime()) / 60000));
-      const tableLabel =
-        order.orderType === 'TAKE_AWAY' ? `TAKE-AWAY:${order.customerName || 'WALK-IN'}` : `TABLE:${order.tableId || 'N/A'}`;
-
+      const tableLabel = order.orderType === 'TAKE_AWAY'
+        ? `TA:${order.customerName || 'Walk-in'}`
+        : `T${order.tableId || '?'}`;
       order.items.forEach((item) => {
-        const modifierSignature = getModifierSignature(item);
-        const key = `${item.menuItemId}__${modifierSignature}`;
-        const menuItem = menuItemMap[item.menuItemId];
-        const targetPrepMinutes = menuItem?.targetPrepMinutes || DEFAULT_TARGET_PREP_MINUTES;
+        const sig = getModifierSignature(item);
+        const key = `${item.menuItemId}__${sig}`;
+        const mi = menuItemMap[item.menuItemId];
+        const targetPrepMinutes = mi?.targetPrepMinutes || DEFAULT_TARGET_PREP_MINUTES;
         const station = getStation(item);
-        const cookPriority = menuItem?.cookPriority || 1;
-        const urgencyFactor = oldestMinutes / Math.max(1, targetPrepMinutes);
-        const quantityFactor = Math.max(1, item.quantity / 2);
-        const priorityScore = Number((urgencyFactor * quantityFactor * cookPriority).toFixed(2));
-
-        const existing = grouped.get(key);
-        if (existing) {
-          existing.quantity += item.quantity;
-          existing.orderCount += 1;
-          existing.oldestMinutes = Math.max(existing.oldestMinutes, oldestMinutes);
-          existing.priorityScore = Number(
-            Math.max(existing.priorityScore, priorityScore).toFixed(2)
-          );
-          existing.orderIds = Array.from(new Set([...existing.orderIds, order.id]));
-          existing.tableLabels = Array.from(new Set([...existing.tableLabels, tableLabel]));
+        const priorityScore = Number(
+          ((oldestMinutes / Math.max(1, targetPrepMinutes)) * Math.max(1, item.quantity / 2) * (mi?.cookPriority || 1)).toFixed(2)
+        );
+        const ex = grouped.get(key);
+        if (ex) {
+          ex.quantity += item.quantity;
+          ex.orderCount++;
+          ex.oldestMinutes = Math.max(ex.oldestMinutes, oldestMinutes);
+          ex.priorityScore = Number(Math.max(ex.priorityScore, priorityScore).toFixed(2));
+          ex.orderIds = Array.from(new Set([...ex.orderIds, order.id]));
+          ex.tableLabels = Array.from(new Set([...ex.tableLabels, tableLabel]));
           return;
         }
-
-        grouped.set(key, {
-          key,
-          menuItemId: item.menuItemId,
-          itemName: item.name,
-          quantity: item.quantity,
-          orderCount: 1,
-          tableLabels: [tableLabel],
-          orderIds: [order.id],
-          oldestMinutes,
-          station,
-          targetPrepMinutes,
-          priorityScore,
-          modifierSignature,
-        });
+        grouped.set(key, { key, menuItemId: item.menuItemId, itemName: item.name, quantity: item.quantity, orderCount: 1, tableLabels: [tableLabel], orderIds: [order.id], oldestMinutes, station, targetPrepMinutes, priorityScore, modifierSignature: sig });
       });
     });
-
     return Array.from(grouped.values()).sort((a, b) => b.priorityScore - a.priorityScore);
   }, [placedOrders, preparingOrders, menuItemMap]);
 
   const handleOrderClick = async (order: Order) => {
     try {
-      if (order.status === 'PLACED') {
-        await orderService.updateStatus(order.id, 'PREPARING');
-      } else if (order.status === 'PREPARING') {
-        await orderService.updateStatus(order.id, 'READY');
-      } else if (order.status === 'READY') {
-        await orderService.updateStatus(order.id, 'SERVED');
-      }
-    } catch (error) {
-      console.error('Error updating order status:', error);
-    }
+      if (order.status === 'PLACED')         await orderService.updateStatus(order.id, 'PREPARING');
+      else if (order.status === 'PREPARING') await orderService.updateStatus(order.id, 'READY');
+      else if (order.status === 'READY')     await orderService.updateStatus(order.id, 'SERVED');
+    } catch (err) { console.error(err); }
   };
 
-  const OrderCard = ({ order, onClick }: { order: Order; onClick: () => void }) => {
-    const orderTime = order.createdAt instanceof Date
-      ? order.createdAt
-      : new Date((order.createdAt as Timestamp).seconds * 1000);
-
-    const getCardStyle = () => {
-      const isTakeAway = order.orderType === 'TAKE_AWAY';
-
-      if (order.status === 'PLACED') {
-        return isTakeAway
-          ? 'border-4 border-blue-600 bg-blue-100'
-          : 'border-4 border-red-600 bg-red-50';
-      } else if (order.status === 'PREPARING') {
-        return isTakeAway
-          ? 'border-4 border-blue-600 bg-blue-100'
-          : 'border-4 border-yellow-600 bg-yellow-50';
-      } else if (order.status === 'READY') {
-        return isTakeAway
-          ? 'border-4 border-green-600 bg-green-100'
-          : 'border-4 border-blue-600 bg-blue-50';
-      }
-      return isTakeAway
-        ? 'border-4 border-blue-600 bg-blue-50'
-        : 'border-4 border-black bg-white';
-    };
-
-    const getHeaderText = () => {
-      if (order.orderType === 'TAKE_AWAY') {
-        return order.customerName?.toUpperCase() || 'TAKE-AWAY';
-      }
-      if (order.tableId) {
-        return `TABLE #${order.tableId}`;
-      }
-      return 'NO TABLE';
-    };
-
-    const getActionText = () => {
-      const isTakeAway = order.orderType === 'TAKE_AWAY';
-
-      if (order.status === 'PLACED') {
-        return <span className={isTakeAway ? 'text-blue-700' : 'text-red-700'}>
-          [ {isTakeAway ? 'TAKE-AWAY' : 'NEW'} TAP TO START COOKING ]
-        </span>;
-      } else if (order.status === 'PREPARING') {
-        return <span className={isTakeAway ? 'text-blue-700' : 'text-yellow-700'}>
-          [ {isTakeAway ? 'TAKE-AWAY' : 'COOKING'} TAP WHEN READY ]
-        </span>;
-      } else {
-        return <span className={isTakeAway ? 'text-green-700' : 'text-blue-700'}>
-          [ {isTakeAway ? 'DONE' : 'READY'} TAP TO {isTakeAway ? 'COMPLETE' : 'SERVE'} ]
-        </span>;
-      }
-    };
+  // ─── Order Card ─────────────────────────────────────────────────────────────
+  const OrderCard = ({ order, st }: { order: Order; st: StatusDef }) => {
+    const orderTime = getOrderDate(order.createdAt);
+    const isTakeAway = order.orderType === 'TAKE_AWAY';
+    const headerText = isTakeAway
+      ? (order.customerName?.toUpperCase() || 'TAKE-AWAY')
+      : order.tableId ? `TABLE #${order.tableId}` : 'NO TABLE';
 
     return (
       <button
-        onClick={onClick}
-        className={`w-full ${getCardStyle()} p-6 hover:opacity-90 active:opacity-75 transition-all text-left font-mono min-h-[200px]`}
+        onClick={() => handleOrderClick(order)}
+        className={`w-full text-left bg-neutral-800 border-l-8 ${st.colBorder} rounded-2xl overflow-hidden shadow-md active:scale-[0.97] transition-transform duration-100`}
       >
-        <div className="text-center mb-4">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <OrderTypeBadge orderType={order.orderType || 'DINE_IN'} />
+        {/* Header */}
+        <div className="flex items-start justify-between px-4 pt-4 pb-2 gap-3">
+          <div>
+            <div className="text-3xl font-black text-white leading-none">{headerText}</div>
+            <div className="flex items-center gap-2 mt-1.5">
+              <OrderTypeBadge orderType={order.orderType || 'DINE_IN'} />
+              <span className="text-neutral-400 text-sm">{format(orderTime, 'HH:mm')}</span>
+            </div>
           </div>
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <div className="text-3xl font-bold">{getHeaderText()}</div>
-          </div>
-          <div className="text-lg font-bold">{format(orderTime, 'HH:mm')}</div>
+          <ElapsedTimer since={orderTime} />
         </div>
 
-        <div className="space-y-2 mb-4">
+        {/* Divider */}
+        <div className="mx-4 border-t border-neutral-700" />
+
+        {/* Items */}
+        <div className="px-4 py-3 space-y-2">
           {order.items.map((item: OrderItem, idx: number) => (
-            <div key={idx} className="text-lg border-b border-gray-300 pb-2 last:border-0">
-              <div className="flex gap-3">
-                <span className="font-bold text-xl">{item.quantity}×</span>
-                <span className="flex-1 font-bold">{item.name.toUpperCase()}</span>
+            <div key={idx}>
+              <div className="flex items-baseline gap-3">
+                <span className="text-5xl font-black text-white leading-none w-14 text-right shrink-0">
+                  {item.quantity}
+                </span>
+                <span className="text-xl font-bold text-white leading-tight">
+                  {item.name.toUpperCase()}
+                </span>
               </div>
               {item.modifiers && item.modifiers.length > 0 && (
-                <div className="ml-8 text-base mt-1 border-l-4 border-black pl-2">
-                  {item.modifiers.map((mod, modIdx: number) => (
-                    <div key={modIdx} className="font-bold">→ {mod.optionName}</div>
+                <div className="ml-16 mt-1 space-y-0.5">
+                  {item.modifiers.map((mod, mi: number) => (
+                    <div key={mi} className="text-base font-semibold text-neutral-300">
+                      ▸ {mod.optionName}
+                    </div>
                   ))}
                 </div>
               )}
@@ -307,112 +271,106 @@ export default function KDSPage() {
           ))}
         </div>
 
-        <div className="text-center text-base pt-3 mt-3">
-          <div className="font-bold text-lg">
-            {getActionText()}
-          </div>
+        {/* Action */}
+        <div className={`mx-4 mb-4 mt-1 py-3 rounded-xl text-center font-black text-white text-lg ${st.actionBg} transition-colors`}>
+          {st.action}
         </div>
       </button>
     );
   };
 
+  // ─── Column ──────────────────────────────────────────────────────────────────
+  const Column = ({ st, orders }: { st: StatusDef; orders: Order[] }) => (
+    <div className="flex flex-col gap-3">
+      {/* Column header — only place the status color is used strongly */}
+      <div className={`${st.hdrBg} rounded-2xl px-5 py-3 flex items-center justify-between`}>
+        <h2 className="text-2xl font-black text-white">{st.label}</h2>
+        <span className="text-5xl font-black text-white/80">{orders.length}</span>
+      </div>
+      {orders.length === 0 ? (
+        <div className="border-2 border-dashed border-neutral-700 rounded-2xl p-10 text-center">
+          <p className="text-lg font-bold text-neutral-500">{st.emptyMsg}</p>
+        </div>
+      ) : (
+        orders.map((order) => <OrderCard key={order.id} order={order} st={st} />)
+      )}
+    </div>
+  );
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-white font-mono p-4 md:p-6">
-      <div className="max-w-[1800px] mx-auto mb-6">
-        <div className="border-4 border-black p-4 bg-gray-50">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <h2 className="text-xl font-bold">SMART PREP BATCHES</h2>
-            <p className="text-sm">Same menu across orders is grouped for faster parallel cooking</p>
+    <>
+      {/* Nunito: rounded humanist sans-serif — top recommended for kitchen display legibility */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+        * { font-family: 'Nunito', 'Helvetica Neue', Arial, sans-serif; }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: #121212; }
+        ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+      `}</style>
+
+      <div className="min-h-screen p-3 md:p-4" style={{ background: '#121212' }}>
+
+        {/* ── Status Bar ─────────────────────────────────────────────────── */}
+        <div className="bg-neutral-800 rounded-2xl px-5 py-3 mb-4 flex items-center justify-between border border-neutral-700 shadow-xl">
+          <div>
+            <h1 className="text-3xl font-black text-white">🍳 Kitchen Display</h1>
+            <div className="flex gap-5 mt-1">
+              <span className="text-red-400 font-bold text-lg">🔴 {placedOrders.length} NEW</span>
+              <span className="text-amber-400 font-bold text-lg">🟡 {preparingOrders.length} COOKING</span>
+              <span className="text-green-400 font-bold text-lg">🟢 {readyOrders.length} READY</span>
+            </div>
           </div>
+          <LiveClock />
+        </div>
+
+        {/* ── Smart Prep Batches — neutral surface, no extra color ────────── */}
+        <div className="bg-neutral-800 border border-neutral-700 rounded-2xl p-3 mb-4">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <h2 className="text-xl font-black text-white">⚡ Smart Prep Batches</h2>
+            <span className="text-sm text-neutral-400">Same item grouped for faster cooking</span>
+          </div>
+
           {smartBatches.length === 0 ? (
-            <div className="border-2 border-dashed border-gray-400 p-6 text-center text-sm">
-              NO ACTIVE BATCHES
+            <div className="border-2 border-dashed border-neutral-700 rounded-xl p-5 text-center">
+              <p className="text-lg font-bold text-neutral-500">NO ACTIVE BATCHES</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {smartBatches.map((batch) => (
-                <div key={batch.key} className="border-2 border-black bg-white p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-lg font-bold leading-tight">{batch.itemName.toUpperCase()}</p>
-                      <p className="text-xs text-gray-600 mt-1">{batch.modifierSignature}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold">{batch.quantity}x</p>
-                      <p className="text-xs">TOTAL QTY</p>
-                    </div>
+                <div key={batch.key} className="bg-neutral-900 border border-neutral-700 rounded-xl p-3">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <p className="text-base font-bold text-white leading-tight">
+                      {batch.itemName.toUpperCase()}
+                    </p>
+                    <span className="text-3xl font-black text-white leading-none">{batch.quantity}×</span>
                   </div>
-                  <p className="text-xs mt-3">
-                    <span className="font-bold">ORDERS:</span> {batch.orderCount}
-                  </p>
-                  <p className="text-xs mt-1">
-                    <span className="font-bold">TABLES/TAKE-AWAY:</span> {batch.tableLabels.join(', ')}
-                  </p>
+                  <div className="flex items-center gap-2 mb-1">
+                    {/* Station badge — single neutral style, no multi-color noise */}
+                    <span className="text-xs font-bold px-2 py-0.5 rounded bg-neutral-700 text-neutral-200 uppercase">
+                      {batch.station}
+                    </span>
+                    <span className="text-xs text-neutral-400">{batch.orderCount} order{batch.orderCount > 1 ? 's' : ''}</span>
+                  </div>
+                  <p className="text-xs text-neutral-400 truncate">{batch.tableLabels.join(' · ')}</p>
+                  {batch.modifierSignature !== 'STANDARD' && (
+                    <p className="text-xs text-neutral-400 italic mt-0.5 truncate">{batch.modifierSignature}</p>
+                  )}
+                  {/* Priority bar uses the same R/A/G traffic-light colors */}
+                  <PriorityBar score={batch.priorityScore} />
                 </div>
               ))}
             </div>
           )}
         </div>
-      </div>
 
-      <div className="max-w-[1800px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
-        <div>
-          <div className="border-4 border-black bg-black text-white p-4 mb-4">
-            <div className="text-center">
-              <h2 className="text-2xl md:text-3xl font-bold mb-1">NEW ORDERS</h2>
-              <p className="text-xl md:text-2xl font-bold">{placedOrders.length}</p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            {placedOrders.map((order: Order) => (
-              <OrderCard key={order.id} order={order} onClick={() => handleOrderClick(order)} />
-            ))}
-            {placedOrders.length === 0 && (
-              <div className="border-4 border-dashed border-gray-400 p-12 text-center bg-gray-50">
-                <p className="text-xl text-gray-600">NO NEW ORDERS</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div>
-          <div className="border-4 border-black bg-black text-white p-4 mb-4">
-            <div className="text-center">
-              <h2 className="text-2xl md:text-3xl font-bold mb-1">PREPARING</h2>
-              <p className="text-xl md:text-2xl font-bold">{preparingOrders.length}</p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            {preparingOrders.map((order: Order) => (
-              <OrderCard key={order.id} order={order} onClick={() => handleOrderClick(order)} />
-            ))}
-            {preparingOrders.length === 0 && (
-              <div className="border-4 border-dashed border-gray-400 p-12 text-center bg-gray-50">
-                <p className="text-xl text-gray-600">NO ORDERS COOKING</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div>
-          <div className="border-4 border-black bg-black text-white p-4 mb-4">
-            <div className="text-center">
-              <h2 className="text-2xl md:text-3xl font-bold mb-1">READY</h2>
-              <p className="text-xl md:text-2xl font-bold">{readyOrders.length}</p>
-            </div>
-          </div>
-          <div className="space-y-3 md:space-y-4">
-            {readyOrders.map((order: Order) => (
-              <OrderCard key={order.id} order={order} onClick={() => handleOrderClick(order)} />
-            ))}
-            {readyOrders.length === 0 && (
-              <div className="border-4 border-dashed border-gray-400 p-12 text-center bg-gray-50">
-                <p className="text-xl text-gray-600">NO ORDERS READY</p>
-              </div>
-            )}
-          </div>
+        {/* ── Three Columns — neutral cards, only headers and borders use R/A/G ── */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Column st={STATUS.placed}    orders={placedOrders} />
+          <Column st={STATUS.preparing} orders={preparingOrders} />
+          <Column st={STATUS.ready}     orders={readyOrders} />
         </div>
       </div>
-    </div>
+    </>
   );
 }
