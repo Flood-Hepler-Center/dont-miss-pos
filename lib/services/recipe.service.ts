@@ -211,12 +211,10 @@ export const recipeService = {
             }
             
             const newStock = inventoryItem.currentStock - deductQty;
-
-            if (newStock < 0) {
-              throw new Error(
-                `Insufficient stock for ${ingredient.inventoryItemName}. Required: ${deductQty}, Available: ${inventoryItem.currentStock}`
-              );
-            }
+            // NOTE: Negative stock is intentionally allowed here.
+            // Real-world recipe usage has ±10–15% variance so inventory
+            // is best-effort tracking only. Orders are never blocked by
+            // recipe-layer stock — only item-level hasStockTracking does that.
 
             transaction.update(inventoryRef, {
               currentStock: newStock,

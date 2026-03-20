@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { orderService } from '@/lib/services/order.service';
@@ -30,51 +30,64 @@ type StatusDef = {
   colBorder: string;
   hdrBg: string;
   hdrText: string;
-  actionBg: string;
   label: string;
-  action: string;
   emptyMsg: string;
 };
 
 // ─── Color Design Decision ──────────────────────────────────────────────────
-// Research (qsrautomations.com, oracle.com, lightspeedhq.com, clearpointstrategy.com):
-// Industry-standard KDS uses the "traffic light" principle exclusively — 3 colors only.
-// All status meaning is carried by Red / Amber / Green. Everything else is neutral dark.
-// This prevents color overload and lets chefs read the screen in < 1 second.
-//
-//  RED #EF4444    → NEW / URGENT (needs action now)
-//  AMBER #F59E0B  → COOKING (in progress, monitor)
-//  GREEN #22C55E  → READY (done, pick up)
-//  DARK #1C1C1C   → all surfaces / cards / sections (neutral)
-//  #121212        → page background (Material Design dark mode spec)
+// Industry-standard KDS uses the "traffic light" principle exclusively — 3 colors.
+// RED #EF4444 → NEW / URGENT | AMBER #F59E0B → COOKING | GREEN #22C55E → READY
+// DARK #1C1C1C → all surfaces | #121212 → page background
 
 const STATUS = {
   placed: {
     colBorder: 'border-l-red-500',
     hdrBg:     'bg-red-600',
     hdrText:   'text-white',
-    actionBg:  'bg-red-600 hover:bg-red-500',
     label:     '🔴  NEW ORDERS',
-    action:    '▶  TAP TO START',
     emptyMsg:  'NO NEW ORDERS',
   },
   preparing: {
     colBorder: 'border-l-amber-400',
     hdrBg:     'bg-amber-600',
     hdrText:   'text-white',
-    actionBg:  'bg-amber-600 hover:bg-amber-500',
     label:     '🟡  COOKING',
-    action:    '✓  TAP WHEN DONE',
     emptyMsg:  'NOTHING COOKING',
   },
   ready: {
     colBorder: 'border-l-green-500',
     hdrBg:     'bg-green-600',
     hdrText:   'text-white',
-    actionBg:  'bg-green-600 hover:bg-green-500',
     label:     '🟢  READY',
-    action:    '🔔  TAP TO SERVE',
     emptyMsg:  'NOTHING READY',
+  },
+} as const;
+
+// Per-item status config
+const ITEM_STATUS_CONFIG = {
+  PLACED: {
+    badge:     'bg-red-600 text-white',
+    btnBg:     'bg-red-600 hover:bg-red-500 text-white',
+    btnLabel:  '▶ START',
+    nextStatus: 'PREPARING' as const,
+  },
+  PREPARING: {
+    badge:     'bg-amber-500 text-white',
+    btnBg:     'bg-amber-500 hover:bg-amber-400 text-white',
+    btnLabel:  '✓ DONE',
+    nextStatus: 'READY' as const,
+  },
+  READY: {
+    badge:     'bg-green-600 text-white',
+    btnBg:     'bg-green-600 hover:bg-green-500 text-white',
+    btnLabel:  '🔔 SERVE',
+    nextStatus: 'SERVED' as const,
+  },
+  SERVED: {
+    badge:     'bg-neutral-600 text-neutral-300',
+    btnBg:     'bg-neutral-700 text-neutral-400 cursor-not-allowed',
+    btnLabel:  '✅ SERVED',
+    nextStatus: null,
   },
 } as const;
 
@@ -89,10 +102,6 @@ function LiveClock() {
 }
 
 // ─── Elapsed Timer ───────────────────────────────────────────────────────────
-// Thresholds per industry KDS standard (qsrautomations.com):
-//   0–4 min  → green  (on schedule)
-//   5–9 min  → amber  (approaching limit)
-//   10+ min  → red pulsing (overdue — must act)
 function ElapsedTimer({ since }: { since: Date }) {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -130,6 +139,7 @@ export default function KDSPage() {
   const [preparingOrders, setPreparingOrders] = useState<Order[]>([]);
   const [readyOrders, setReadyOrders]         = useState<Order[]>([]);
   const [menuItems, setMenuItems]             = useState<MenuItem[]>([]);
+  const [loadingItems, setLoadingItems]       = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const q = query(collection(db, 'orders'), where('status', '==', 'PLACED'));
@@ -161,7 +171,7 @@ export default function KDSPage() {
     return new Date();
   };
 
-  const getStation = (item: OrderItem): string => {
+  const getStation = useCallback((item: OrderItem): string => {
     const mi = menuItemMap[item.menuItemId];
     if (mi?.prepStation) return mi.prepStation.replace('_', ' ');
     const n = item.name.toLowerCase();
@@ -169,12 +179,12 @@ export default function KDSPage() {
     if (n.includes('cake') || n.includes('dessert') || n.includes('ice cream')) return 'DESSERT';
     if (n.includes('salad') || n.includes('cold') || n.includes('sushi')) return 'COLD KITCHEN';
     return 'HOT KITCHEN';
-  };
+  }, [menuItemMap]);
 
-  const getModifierSignature = (item: OrderItem): string => {
+  const getModifierSignature = useCallback((item: OrderItem): string => {
     if (!item.modifiers || item.modifiers.length === 0) return 'STANDARD';
     return item.modifiers.map((m) => `${m.modifierGroupName}:${m.optionName}`).sort().join(' | ');
-  };
+  }, []);
 
   const smartBatches = useMemo(() => {
     const active = [...placedOrders, ...preparingOrders];
@@ -186,6 +196,7 @@ export default function KDSPage() {
         ? `TA:${order.customerName || 'Walk-in'}`
         : `T${order.tableId || '?'}`;
       order.items.forEach((item) => {
+        if (item.isVoided) return;
         const sig = getModifierSignature(item);
         const key = `${item.menuItemId}__${sig}`;
         const mi = menuItemMap[item.menuItemId];
@@ -208,17 +219,27 @@ export default function KDSPage() {
       });
     });
     return Array.from(grouped.values()).sort((a, b) => b.priorityScore - a.priorityScore);
-  }, [placedOrders, preparingOrders, menuItemMap]);
+  }, [placedOrders, preparingOrders, menuItemMap, getStation, getModifierSignature]);
 
-  const handleOrderClick = async (order: Order) => {
+  // ─── Per-item status handler ─────────────────────────────────────────────
+  const handleItemClick = useCallback(async (
+    orderId: string,
+    itemIndex: number,
+    currentItemStatus: 'PLACED' | 'PREPARING' | 'READY' | 'SERVED'
+  ) => {
+    const cfg = ITEM_STATUS_CONFIG[currentItemStatus];
+    if (!cfg.nextStatus) return; // already SERVED
+    const loadKey = `${orderId}-${itemIndex}`;
+    setLoadingItems((prev) => new Set(prev).add(loadKey));
     try {
-      if (order.status === 'PLACED')         await orderService.updateStatus(order.id, 'PREPARING');
-      else if (order.status === 'PREPARING') await orderService.updateStatus(order.id, 'READY');
-      else if (order.status === 'READY')     await orderService.updateStatus(order.id, 'SERVED');
+      await orderService.updateItemStatus(orderId, itemIndex, cfg.nextStatus);
     } catch (err) { console.error(err); }
-  };
+    finally {
+      setLoadingItems((prev) => { const s = new Set(prev); s.delete(loadKey); return s; });
+    }
+  }, []);
 
-  // ─── Order Card ─────────────────────────────────────────────────────────────
+  // ─── Order Card — per-item rows ──────────────────────────────────────────
   const OrderCard = ({ order, st }: { order: Order; st: StatusDef }) => {
     const orderTime = getOrderDate(order.createdAt);
     const isTakeAway = order.orderType === 'TAKE_AWAY';
@@ -226,11 +247,10 @@ export default function KDSPage() {
       ? (order.customerName?.toUpperCase() || 'TAKE-AWAY')
       : order.tableId ? `TABLE #${order.tableId}` : 'NO TABLE';
 
+    const activeItems = order.items.filter((i) => !i.isVoided);
+
     return (
-      <button
-        onClick={() => handleOrderClick(order)}
-        className={`w-full text-left bg-neutral-800 border-l-8 ${st.colBorder} rounded-2xl overflow-hidden shadow-md active:scale-[0.97] transition-transform duration-100`}
-      >
+      <div className={`w-full bg-neutral-800 border-l-8 ${st.colBorder} rounded-2xl overflow-hidden shadow-md`}>
         {/* Header */}
         <div className="flex items-start justify-between px-4 pt-4 pb-2 gap-3">
           <div>
@@ -246,43 +266,66 @@ export default function KDSPage() {
         {/* Divider */}
         <div className="mx-4 border-t border-neutral-700" />
 
-        {/* Items */}
-        <div className="px-4 py-3 space-y-2">
-          {order.items.map((item: OrderItem, idx: number) => (
-            <div key={idx}>
-              <div className="flex items-baseline gap-3">
-                <span className="text-5xl font-black text-white leading-none w-14 text-right shrink-0">
-                  {item.quantity}
-                </span>
-                <span className="text-xl font-bold text-white leading-tight">
-                  {item.name.toUpperCase()}
-                </span>
-              </div>
-              {item.modifiers && item.modifiers.length > 0 && (
-                <div className="ml-16 mt-1 space-y-0.5">
-                  {item.modifiers.map((mod, mi: number) => (
-                    <div key={mi} className="text-base font-semibold text-neutral-300">
-                      ▸ {mod.optionName}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+        {/* Items — each with its own status control */}
+        <div className="px-4 py-3 space-y-3">
+          {activeItems.map((item: OrderItem, idx: number) => {
+            // Find original index in full items array for service call
+            const originalIdx = order.items.indexOf(item);
+            const effectiveStatus = (item.itemStatus ?? 'PLACED') as 'PLACED' | 'PREPARING' | 'READY' | 'SERVED';
+            const cfg = ITEM_STATUS_CONFIG[effectiveStatus];
+            const loadKey = `${order.id}-${originalIdx}`;
+            const isLoading = loadingItems.has(loadKey);
 
-        {/* Action */}
-        <div className={`mx-4 mb-4 mt-1 py-3 rounded-xl text-center font-black text-white text-lg ${st.actionBg} transition-colors`}>
-          {st.action}
+            return (
+              <div key={idx} className="bg-neutral-900 rounded-xl p-3">
+                {/* Item name & quantity */}
+                <div className="flex items-baseline gap-3 mb-2">
+                  <span className="text-4xl font-black text-white leading-none w-12 text-right shrink-0">
+                    {item.quantity}
+                  </span>
+                  <span className="text-lg font-bold text-white leading-tight flex-1">
+                    {item.name.toUpperCase()}
+                  </span>
+                  {/* Item status badge */}
+                  <span className={`text-xs font-black px-2 py-0.5 rounded-full shrink-0 ${cfg.badge}`}>
+                    {effectiveStatus}
+                  </span>
+                </div>
+
+                {/* Modifiers */}
+                {item.modifiers && item.modifiers.length > 0 && (
+                  <div className="ml-14 mb-2 space-y-0.5">
+                    {item.modifiers.map((mod, mi: number) => (
+                      <div key={mi} className="text-sm font-semibold text-neutral-400">
+                        ▸ {mod.optionName}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Advance button */}
+                <button
+                  onClick={() => handleItemClick(order.id, originalIdx, effectiveStatus)}
+                  disabled={effectiveStatus === 'SERVED' || isLoading}
+                  className={`w-full mt-1 py-2 rounded-lg text-sm font-black transition-colors ${
+                    effectiveStatus === 'SERVED'
+                      ? 'bg-neutral-700 text-neutral-500 cursor-default'
+                      : `${cfg.btnBg} active:scale-[0.97]`
+                  }`}
+                >
+                  {isLoading ? '...' : cfg.btnLabel}
+                </button>
+              </div>
+            );
+          })}
         </div>
-      </button>
+      </div>
     );
   };
 
   // ─── Column ──────────────────────────────────────────────────────────────────
   const Column = ({ st, orders }: { st: StatusDef; orders: Order[] }) => (
     <div className="flex flex-col gap-3">
-      {/* Column header — only place the status color is used strongly */}
       <div className={`${st.hdrBg} rounded-2xl px-5 py-3 flex items-center justify-between`}>
         <h2 className="text-2xl font-black text-white">{st.label}</h2>
         <span className="text-5xl font-black text-white/80">{orders.length}</span>
@@ -321,10 +364,13 @@ export default function KDSPage() {
               <span className="text-green-400 font-bold text-lg">🟢 {readyOrders.length} READY</span>
             </div>
           </div>
-          <LiveClock />
+          <div className="flex flex-col items-end gap-1">
+            <LiveClock />
+            <span className="text-xs text-neutral-500 font-semibold">TAP EACH ITEM TO ADVANCE STATUS</span>
+          </div>
         </div>
 
-        {/* ── Smart Prep Batches — neutral surface, no extra color ────────── */}
+        {/* ── Smart Prep Batches ────────────────────────────────────────── */}
         <div className="bg-neutral-800 border border-neutral-700 rounded-2xl p-3 mb-4">
           <div className="flex items-center justify-between mb-3 px-1">
             <h2 className="text-xl font-black text-white">⚡ Smart Prep Batches</h2>
@@ -346,7 +392,6 @@ export default function KDSPage() {
                     <span className="text-3xl font-black text-white leading-none">{batch.quantity}×</span>
                   </div>
                   <div className="flex items-center gap-2 mb-1">
-                    {/* Station badge — single neutral style, no multi-color noise */}
                     <span className="text-xs font-bold px-2 py-0.5 rounded bg-neutral-700 text-neutral-200 uppercase">
                       {batch.station}
                     </span>
@@ -356,7 +401,6 @@ export default function KDSPage() {
                   {batch.modifierSignature !== 'STANDARD' && (
                     <p className="text-xs text-neutral-400 italic mt-0.5 truncate">{batch.modifierSignature}</p>
                   )}
-                  {/* Priority bar uses the same R/A/G traffic-light colors */}
                   <PriorityBar score={batch.priorityScore} />
                 </div>
               ))}
@@ -364,7 +408,7 @@ export default function KDSPage() {
           )}
         </div>
 
-        {/* ── Three Columns — neutral cards, only headers and borders use R/A/G ── */}
+        {/* ── Three Columns ─────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Column st={STATUS.placed}    orders={placedOrders} />
           <Column st={STATUS.preparing} orders={preparingOrders} />

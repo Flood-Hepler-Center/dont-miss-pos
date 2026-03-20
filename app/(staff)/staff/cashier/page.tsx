@@ -98,11 +98,12 @@ export default function CashierPage() {
   };
 
   // Real-time sync: refresh table/orders when changes occur from other pages
+  const selectedTableId = selectedTable?.id;
   useEffect(() => {
-    if (!selectedTable) return;
+    if (!selectedTableId) return;
 
     const unsubscribeTable = onSnapshot(
-      doc(db, 'tables', selectedTable.id),
+      doc(db, 'tables', selectedTableId),
       (docSnap) => {
         if (docSnap.exists()) {
           const updatedTable = { id: docSnap.id, ...docSnap.data() } as Table;
@@ -115,7 +116,7 @@ export default function CashierPage() {
     );
 
     const unsubscribeOrders = orderService.subscribeToTableOrders(
-      selectedTable.id,
+      selectedTableId,
       (updatedOrders) => {
         setOrders(updatedOrders);
       }
@@ -125,7 +126,7 @@ export default function CashierPage() {
       unsubscribeTable();
       unsubscribeOrders();
     };
-  }, [selectedTable?.id]);
+  }, [selectedTableId]);
 
   const currentStepIndex = {
     select: 0,

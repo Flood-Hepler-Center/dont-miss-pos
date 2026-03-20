@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useCartStore } from "@/lib/stores/cartStore";
 import { Notebook, ShoppingCart } from "lucide-react";
@@ -78,6 +78,22 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
         .filter((item) => item.categoryId === activeCategory)
         .sort((a, b) => (a.displayOrder || 999) - (b.displayOrder || 999));
 
+  // Build grouped structure for "All Items" view (category → items[])
+  const groupedItems = useMemo(() => {
+    if (activeCategory !== "all") return null;
+    const groups: { category: (typeof sortedCategories)[0]; items: typeof filteredItems }[] = [];
+    sortedCategories.forEach((cat) => {
+      const catItems = filteredItems.filter((i) => i.categoryId === cat.id);
+      if (catItems.length > 0) groups.push({ category: cat, items: catItems });
+    });
+    // Items with no matching category fall into an "Other" group
+    const assignedIds = new Set(groups.flatMap((g) => g.items.map((i) => i.id)));
+    const uncategorised = filteredItems.filter((i) => !assignedIds.has(i.id));
+    if (uncategorised.length > 0)
+      groups.push({ category: { id: '__other__', name: 'Other', displayOrder: 999, isActive: true, createdAt: new Date(), updatedAt: new Date() }, items: uncategorised });
+    return groups;
+  }, [activeCategory, filteredItems, sortedCategories]);
+
   const getIsAvailable = (item: MenuItem) => {
     if (!item.isAvailable) return false;
     if (item.hasStockTracking) {
@@ -140,72 +156,132 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
         </div>
       </div>
 
-      {/* Menu Items - With Images */}
+      {/* Menu Items */}
       <div className="max-w-2xl mx-auto px-4 py-6">
-        <div className="space-y-3">
-          {filteredItems.map((item) => (
-            <div
-              key={item.id}
-              className="bg-white border-2 border-black p-3 hover:bg-gray-50 transition-colors"
-            >
-              <div className="flex items-start gap-3">
-                {/* Item Image */}
-                {item.imageUrl && (
-                  <div className="relative w-20 h-20 shrink-0 border-2 border-black">
-                    <Image
-                      src={item.imageUrl}
-                      alt={item.name}
-                      fill
-                      className="object-cover"
-                      sizes="80px"
-                      unoptimized
-                    />
+
+        {/* ── All-Items view: grouped with category headers ─────────── */}
+        {groupedItems ? (
+          <div className="space-y-6">
+            {groupedItems.map(({ category, items: catItems }: { category: typeof sortedCategories[0]; items: typeof filteredItems }) => (
+              <div key={category.id}>
+                {/* Receipt-aesthetic category title */}
+                <div className="mb-3">
+                  <div className="text-xs text-center text-gray-400 tracking-widest mb-1">
+                    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
                   </div>
-                )}
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <h3 className="text-sm font-bold uppercase">{item.name}</h3>
-                    {!getIsAvailable(item) && (
-                      <span className="text-xs bg-black text-white px-2 py-0.5">
-                        SOLD OUT
-                      </span>
-                    )}
-                  </div>
-
-                  {item.description && (
-                    <p className="text-xs text-gray-600 mb-2 leading-relaxed line-clamp-2">
-                      {item.description}
-                    </p>
-                  )}
-
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-base">
-                      ฿{item.price.toFixed(2)}
+                  <div className="border-2 border-black bg-black text-white text-center py-2 px-4">
+                    <span className="text-xs font-black tracking-[0.25em] uppercase">
+                      {category.emoji ? `${category.emoji}  ` : ''}{category.name.toUpperCase()}
                     </span>
+                  </div>
+                  <div className="text-xs text-center text-gray-400 tracking-widest mt-1">
+                    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+                  </div>
+                </div>
 
-                    <button
-                      onClick={() => handleAddToCart(item)}
-                      disabled={!getIsAvailable(item)}
-                      className={`px-4 py-2 text-xs font-bold border-2 border-black transition-all ${addedItemId === item.id
-                        ? "bg-green-600 text-white border-green-600"
-                        : getIsAvailable(item)
-                          ? "bg-black text-white hover:bg-gray-800"
-                          : "bg-gray-300 text-gray-500 border-gray-300 cursor-not-allowed"
-                        }`}
+                {/* Items in this category */}
+                <div className="space-y-3">
+                  {catItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="bg-white border-2 border-black p-3 hover:bg-gray-50 transition-colors"
                     >
-                      {addedItemId === item.id ? "✓ ADDED" : "+ ADD"}
-                    </button>
+                      <div className="flex items-start gap-3">
+                        {item.imageUrl && (
+                          <div className="relative w-20 h-20 shrink-0 border-2 border-black">
+                            <Image src={item.imageUrl} alt={item.name} fill className="object-cover" sizes="80px" unoptimized />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline gap-2 mb-1">
+                            <h3 className="text-sm font-bold uppercase">{item.name}</h3>
+                            {!getIsAvailable(item) && (
+                              <span className="text-xs bg-black text-white px-2 py-0.5">SOLD OUT</span>
+                            )}
+                          </div>
+                          {item.description && (
+                            <p className="text-xs text-gray-600 mb-2 leading-relaxed line-clamp-2">{item.description}</p>
+                          )}
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-base">฿{item.price.toFixed(2)}</span>
+                            <button
+                              onClick={() => handleAddToCart(item)}
+                              disabled={!getIsAvailable(item)}
+                              className={`px-4 py-2 text-xs font-bold border-2 border-black transition-all ${
+                                addedItemId === item.id
+                                  ? "bg-green-600 text-white border-green-600"
+                                  : getIsAvailable(item)
+                                    ? "bg-black text-white hover:bg-gray-800"
+                                    : "bg-gray-300 text-gray-500 border-gray-300 cursor-not-allowed"
+                              }`}
+                            >
+                              {addedItemId === item.id ? "✓ ADDED" : "+ ADD"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {groupedItems.length === 0 && (
+              <div className="text-center py-12 border-2 border-black border-dashed">
+                <p className="text-sm text-gray-600">NO ITEMS AVAILABLE</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* ── Single-category view: flat list ─────────────────────── */
+          <div className="space-y-3">
+            {filteredItems.map((item) => (
+              <div
+                key={item.id}
+                className="bg-white border-2 border-black p-3 hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-start gap-3">
+                  {item.imageUrl && (
+                    <div className="relative w-20 h-20 shrink-0 border-2 border-black">
+                      <Image src={item.imageUrl} alt={item.name} fill className="object-cover" sizes="80px" unoptimized />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2 mb-1">
+                      <h3 className="text-sm font-bold uppercase">{item.name}</h3>
+                      {!getIsAvailable(item) && (
+                        <span className="text-xs bg-black text-white px-2 py-0.5">SOLD OUT</span>
+                      )}
+                    </div>
+                    {item.description && (
+                      <p className="text-xs text-gray-600 mb-2 leading-relaxed line-clamp-2">{item.description}</p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-base">฿{item.price.toFixed(2)}</span>
+                      <button
+                        onClick={() => handleAddToCart(item)}
+                        disabled={!getIsAvailable(item)}
+                        className={`px-4 py-2 text-xs font-bold border-2 border-black transition-all ${
+                          addedItemId === item.id
+                            ? "bg-green-600 text-white border-green-600"
+                            : getIsAvailable(item)
+                              ? "bg-black text-white hover:bg-gray-800"
+                              : "bg-gray-300 text-gray-500 border-gray-300 cursor-not-allowed"
+                        }`}
+                      >
+                        {addedItemId === item.id ? "✓ ADDED" : "+ ADD"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
 
-        {filteredItems.length === 0 && (
-          <div className="text-center py-12 border-2 border-black border-dashed">
-            <p className="text-sm text-gray-600">NO ITEMS IN THIS CATEGORY</p>
+            {filteredItems.length === 0 && (
+              <div className="text-center py-12 border-2 border-black border-dashed">
+                <p className="text-sm text-gray-600">NO ITEMS IN THIS CATEGORY</p>
+              </div>
+            )}
           </div>
         )}
       </div>

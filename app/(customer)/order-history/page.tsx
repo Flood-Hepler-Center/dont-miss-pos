@@ -37,7 +37,7 @@ export default function OrderHistoryPage() {
     );
 
     return () => unsubscribe();
-  }, [sessionId]);
+  }, [sessionId, tableId]);
 
   const getStatusColor = (status: string) => {
     switch (status) {

@@ -37,20 +37,10 @@ export const orderService = {
         throw new Error('Order type is required');
       }
 
-      // Check inventory availability for all items
-      for (const item of input.items) {
-        if (item.menuItemId) {
-          const availability = await recipeService.checkInventoryAvailability(
-            item.menuItemId,
-            item.quantity
-          );
-          if (!availability.available) {
-            throw new Error(
-              `Insufficient ingredients: ${availability.missingIngredients.join(', ')}`
-            );
-          }
-        }
-      }
+      // NOTE: Recipe/inventory layer is intentionally NOT checked here.
+      // Real-world recipes have ±10-15% variance, so only item-level stock
+      // (hasStockTracking) is enforced. Inventory deduction still happens
+      // after the order is created but will never block the order.
 
       // Validate based on order type
       if (input.orderType === 'DINE_IN') {
@@ -259,7 +249,7 @@ export const orderService = {
         throw new Error(`Cannot transition from ${currentStatus} to ${newStatus}`);
       }
 
-      const updateData: Record<string, any> = {
+      const updateData: Record<string, unknown> = {
         status: newStatus,
         updatedAt: serverTimestamp(),
       };
@@ -272,6 +262,66 @@ export const orderService = {
       await updateDoc(orderRef, updateData);
     } catch (error) {
       console.error('Error updating order status:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Advance a single item's status and auto-derive the overall order status.
+   * Follows: PLACED → PREPARING → READY → SERVED (per item)
+   */
+  async updateItemStatus(
+    orderId: string,
+    itemIndex: number,
+    newItemStatus: 'PLACED' | 'PREPARING' | 'READY' | 'SERVED'
+  ): Promise<void> {
+    try {
+      const orderRef = doc(db, 'orders', orderId);
+      const orderSnap = await getDoc(orderRef);
+
+      if (!orderSnap.exists()) {
+        throw new Error('Order not found');
+      }
+
+      const orderData = orderSnap.data() as Order;
+      const items = [...orderData.items];
+
+      if (itemIndex < 0 || itemIndex >= items.length) {
+        throw new Error('Invalid item index');
+      }
+
+      items[itemIndex] = { ...items[itemIndex], itemStatus: newItemStatus };
+
+      // Auto-derive overall order status from all non-void items
+      const activeItems = items.filter((i) => !i.isVoided);
+      const getEffectiveStatus = (s?: string) => s || 'PLACED';
+
+      let derivedStatus: OrderStatus;
+      if (activeItems.every((i) => getEffectiveStatus(i.itemStatus) === 'SERVED')) {
+        derivedStatus = 'SERVED';
+      } else if (activeItems.every((i) => ['READY', 'SERVED'].includes(getEffectiveStatus(i.itemStatus)))) {
+        derivedStatus = 'READY';
+      } else if (activeItems.some((i) => ['PREPARING', 'READY', 'SERVED'].includes(getEffectiveStatus(i.itemStatus)))) {
+        derivedStatus = 'PREPARING';
+      } else {
+        derivedStatus = 'PLACED';
+      }
+
+      const updateData: Record<string, unknown> = {
+        items,
+        status: derivedStatus,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (derivedStatus === 'PREPARING' && orderData.status === 'PLACED') {
+        updateData.preparingAt = serverTimestamp();
+      }
+      if (derivedStatus === 'READY') updateData.readyAt = serverTimestamp();
+      if (derivedStatus === 'SERVED') updateData.servedAt = serverTimestamp();
+
+      await updateDoc(orderRef, updateData);
+    } catch (error) {
+      console.error('Error updating item status:', error);
       throw error;
     }
   },

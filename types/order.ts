@@ -35,6 +35,8 @@ export type OrderItem = {
   price: number;
   subtotal: number;
   modifiers?: SelectedModifier[];
+  /** Per-item kitchen status — allows chefs/waiters to advance each item independently */
+  itemStatus?: 'PLACED' | 'PREPARING' | 'READY' | 'SERVED';
   isVoided?: boolean;
   voidReason?: string;
   voidedBy?: string;
