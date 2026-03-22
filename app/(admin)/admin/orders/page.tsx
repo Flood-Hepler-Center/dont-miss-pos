@@ -10,7 +10,7 @@ import { OrderTypeBadge } from '@/components/orders/OrderTypeBadge';
 export default function OrdersManagementPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
-  const [dateFilter, setDateFilter] = useState('today');
+  const [dateFilter, setDateFilter] = useState('satsun');
   const [statusFilter, setStatusFilter] = useState('all');
   const [orderTypeFilter, setOrderTypeFilter] = useState<OrderType | 'all'>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -33,7 +33,18 @@ export default function OrdersManagementPage() {
     let filtered = [...orders];
 
     // Date filter
-    if (dateFilter === 'today') {
+    if (dateFilter === 'satsun') {
+      const now = new Date();
+      const saturday = new Date(now);
+      saturday.setDate(now.getDate() - ((now.getDay() + 1) % 7));
+      saturday.setHours(0, 0, 0, 0);
+      filtered = filtered.filter((order) => {
+        const orderDate = order.createdAt instanceof Date 
+          ? order.createdAt 
+          : new Date((order.createdAt as { seconds: number }).seconds * 1000);
+        return orderDate >= saturday;
+      });
+    } else if (dateFilter === 'today') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       filtered = filtered.filter((order) => {
@@ -176,6 +187,7 @@ export default function OrdersManagementPage() {
               onChange={(e) => setDateFilter(e.target.value)}
               className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
             >
+              <option value="satsun">SAT+SUN</option>
               <option value="today">TODAY</option>
               <option value="week">LAST 7 DAYS</option>
               <option value="month">LAST 30 DAYS</option>

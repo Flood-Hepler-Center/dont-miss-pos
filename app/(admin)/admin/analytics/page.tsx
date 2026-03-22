@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { menuService } from '@/lib/services/menu.service';
-import type { Order, MenuItem } from '@/types';
+import type { Order, MenuItem, MenuCategory } from '@/types';
 import {
   format, startOfDay, endOfDay, subDays,
   startOfWeek, startOfMonth,
@@ -100,7 +100,8 @@ export default function AnalyticsPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [payments, setPayments] = useState<PaymentDoc[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
-  const [dateRange, setDateRange] = useState('today');
+  const [categories, setCategories] = useState<MenuCategory[]>([]);
+  const [dateRange, setDateRange] = useState('satsun');
   const [loading, setLoading] = useState(true);
   const [menuTab, setMenuTab] = useState<'revenue' | 'quantity'>('revenue');
 
@@ -151,15 +152,21 @@ export default function AnalyticsPage() {
     return () => { uO(); uP(); };
   }, []);
 
-  useEffect(() => { menuService.getActiveItems().then(setMenuItems); }, []);
+  useEffect(() => { menuService.getAllItems().then(setMenuItems); }, []);
   const menuItemMap = useMemo(() => {
     return menuItems.reduce<Record<string, MenuItem>>((acc, m) => { acc[m.id] = m; return acc; }, {});
   }, [menuItems]);
+
+  useEffect(() => { menuService.getCategories().then(setCategories); }, []);
+  const categoryMap = useMemo(() => {
+    return categories.reduce<Record<string, string>>((acc, c) => { acc[c.id] = c.name; return acc; }, {});
+  }, [categories]);
 
   // ── Date range ──────────────────────────────────────────────────────────────
   const { startDate, prevStart, prevEnd } = useMemo(() => {
     const now = new Date();
     const map: Record<string, Date> = {
+      satsun: startOfDay(subDays(now, (now.getDay() + 1) % 7)),
       today: startOfDay(now), '7days': subDays(now, 7), '30days': subDays(now, 30),
       week: startOfWeek(now), month: startOfMonth(now), all: new Date(0),
     };
@@ -192,6 +199,11 @@ export default function AnalyticsPage() {
   const prevTotalOrders = useMemo(() => { const pids = new Set(prevValidPay.flatMap(p => p.orderIds)); return orders.filter(o => o.createdAt >= prevStart && o.createdAt < prevEnd && pids.has(o.id)).length; }, [prevValidPay, orders, prevStart, prevEnd]);
   const prevAvg       = prevTotalOrders > 0 ? prevRevenue / prevTotalOrders : 0;
   const delta = (c: number, p: number) => p === 0 ? undefined : `${c >= p ? '+' : ''}${(((c - p) / p) * 100).toFixed(1)}%`;
+
+  const grossOrderValue   = useMemo(() => completedOrders.reduce((s, o) => s + (o.total || 0), 0), [completedOrders]);
+  const grossPaymentValue = useMemo(() => validPayments.reduce((s, p) => s + p.total, 0), [validPayments]);
+  const varianceValue     = grossOrderValue - grossPaymentValue;
+  const cancelledOrderVal = useMemo(() => cancelledOrders.reduce((s, o) => s + (o.total || 0), 0), [cancelledOrders]);
 
   // ── Kitchen Performance (Ticket Time) ──────────────────────────────────────
   const ticketTimes = useMemo(() => {
@@ -288,13 +300,14 @@ export default function AnalyticsPage() {
     const acc: Record<string, { category: string; count: number; revenue: number }> = {};
     completedOrders.forEach(o => o.items.forEach(item => {
       const mi = menuItemMap[item.menuItemId];
-      const cat = mi?.categoryName || 'Uncategorised';
+      const catId = mi?.categoryId;
+      const cat = (catId && categoryMap[catId]) || mi?.categoryName || 'Uncategorised';
       if (!acc[cat]) acc[cat] = { category: cat, count: 0, revenue: 0 };
       acc[cat].count += item.quantity;
       acc[cat].revenue += item.price * item.quantity;
     }));
     return Object.values(acc).sort((a, b) => b.revenue - a.revenue);
-  }, [completedOrders, menuItemMap]);
+  }, [completedOrders, menuItemMap, categoryMap]);
 
   // ── Modifier Analytics ───────────────────────────────────────────────────────
   const modifierStats = useMemo(() => {
@@ -336,19 +349,6 @@ export default function AnalyticsPage() {
     });
     return Object.values(acc).sort((a, b) => b.revenue - a.revenue).slice(0, 12);
   }, [completedOrders]);
-
-  // ── Cashier Performance ────────────────────────────────────────────────────
-  const cashierStats = useMemo(() => {
-    const acc: Record<string, { name: string; revenue: number; count: number; discountGiven: number }> = {};
-    validPayments.forEach(p => {
-      const name = p.processedBy || 'Unknown';
-      if (!acc[name]) acc[name] = { name, revenue: 0, count: 0, discountGiven: 0 };
-      acc[name].revenue      += p.total;
-      acc[name].count++;
-      acc[name].discountGiven += p.discountAmount;
-    });
-    return Object.values(acc).sort((a, b) => b.revenue - a.revenue);
-  }, [validPayments]);
 
   // ── Discount Intelligence ─────────────────────────────────────────────────
   const discountsByReason = useMemo(() => {
@@ -422,6 +422,7 @@ export default function AnalyticsPage() {
             onChange={e => setDateRange(e.target.value)}
             className="border-2 border-black px-3 py-1.5 text-sm font-mono focus:outline-none"
           >
+            <option value="satsun">SAT+SUN</option>
             <option value="today">TODAY</option>
             <option value="7days">LAST 7 DAYS</option>
             <option value="30days">LAST 30 DAYS</option>
@@ -469,8 +470,37 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {/* ══ §3 REVENUE INTELLIGENCE ══════════════════════════════════════ */}
-        <SectionHeader title="§3  REVENUE INTELLIGENCE" sub={`peak hour: ${peakHour.hour}  ·  best day: ${bestDOW.day}`} />
+        {/* ══ §3 REVENUE & ORDER INTELLIGENCE ══════════════════════════════════════ */}
+        <SectionHeader title="§3  REVENUE & ORDER INTELLIGENCE" sub="Reconciliation: Ordered Value (Demand) vs Actual Collected (Bank)" />
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {/* Order Matrix */}
+          <div className="border-2 border-black p-4 bg-gray-50">
+            <h3 className="font-bold text-sm mb-3 pb-2 border-b-2 border-black">[ ORDER MATRIX ] - Demand & Kitchen Load</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <KPI label="GROSS ORDERED VALUE" value={rupiah(grossOrderValue)} sub="total value of requested items" />
+              <KPI label="COMPLETED ORDERS"    value={String(completedOrders.length)} sub="fulfilment volume" />
+              <KPI label="ORDER AOV"           value={completedOrders.length > 0 ? rupiah(grossOrderValue / completedOrders.length) : '฿0'} sub="avg spend per order" />
+              <KPI label="ITEMS PREPARED"      value={String(totalItemsSold)} sub={`${basketSize.toFixed(1)} items / order`} />
+              <KPI label="VOID/CANCEL VALUE"   value={rupiah(cancelledOrderVal)} sub={`${cancelledOrders.length} cancelled orders`} />
+              <KPI label="DINE-IN vs TAKEAWAY" value={`${dineIn.length} / ${takeAway.length}`} sub="split by order volume" />
+            </div>
+          </div>
+
+          {/* Payment Matrix */}
+          <div className="border-2 border-black p-4 bg-gray-50">
+            <h3 className="font-bold text-sm mb-3 pb-2 border-b-2 border-black">[ PAYMENT MATRIX ] - Collection & Treasury</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <KPI label="NET COLLECTED"       value={rupiah(grossPaymentValue)} sub="actual revenue hitting bank" />
+              <KPI label="COMPLETED PAYMENTS"  value={String(validPayments.length)} sub="transaction volume" />
+              <KPI label="PAYMENT AOV"         value={validPayments.length > 0 ? rupiah(grossPaymentValue / validPayments.length) : '฿0'} sub="avg collection per txn" />
+              <KPI label="DISCOUNTS GIVEN"     value={rupiah(totalDiscount)} sub={pct(totalDiscount, grossOrderValue) + ' of gross ordered'} />
+              <KPI label="TAX (VAT/SVC)"       value={rupiah(totalTax)} sub="liability" />
+              <KPI label="UNPAID / VARIANCE"   value={rupiah(varianceValue)} sub="Gross Ordered - Net Collected" />
+            </div>
+          </div>
+        </div>
+
         <div className="border-2 border-black p-4 mb-4">
           <p className="text-xs font-bold mb-2">REVENUE TREND · {rupiah(totalRevenue)} total</p>
           <ResponsiveContainer width="100%" height={220}>
@@ -720,29 +750,10 @@ export default function AnalyticsPage() {
           </>
         )}
 
-        {/* ══ §8 CASHIER PERFORMANCE ════════════════════════════════════════ */}
-        {cashierStats.length > 0 && (
-          <>
-            <SectionHeader title="§8  CASHIER PERFORMANCE" />
-            <div className="border-2 border-black mb-8">
-              <div className="border-b-2 border-black p-2 grid grid-cols-4 text-xs font-bold bg-gray-50">
-                <span>CASHIER</span><span className="text-right">TXN</span>
-                <span className="text-right">REVENUE</span><span className="text-right">DISC GIVEN</span>
-              </div>
-              {cashierStats.map((c, i) => (
-                <div key={i} className="p-2 grid grid-cols-4 text-xs border-b border-gray-100 last:border-0">
-                  <span className="font-bold truncate">{c.name}</span>
-                  <span className="text-right">{c.count}</span>
-                  <span className="text-right font-bold">{rupiah(c.revenue)}</span>
-                  <span className="text-right text-gray-600">{rupiah(c.discountGiven)}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
 
-        {/* ══ §9 DISCOUNT INTELLIGENCE ══════════════════════════════════════ */}
-        <SectionHeader title="§9  DISCOUNT INTELLIGENCE" />
+
+        {/* ══ §8 DISCOUNT INTELLIGENCE ══════════════════════════════════════ */}
+        <SectionHeader title="§8  DISCOUNT INTELLIGENCE" />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <KPI label="TOTAL DISCOUNTS"   value={rupiah(totalDiscount)} sub="revenue given away" />
           <KPI label="DISCOUNT RATE"     value={pct(totalDiscount, totalRevenue + totalDiscount)} sub="of gross sales" />
@@ -764,8 +775,8 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {/* ══ §10 CUSTOMER INTELLIGENCE ════════════════════════════════════ */}
-        <SectionHeader title="§10  CUSTOMER INTELLIGENCE" sub="from cashier tagging" />
+        {/* ══ §9 CUSTOMER INTELLIGENCE ════════════════════════════════════ */}
+        <SectionHeader title="§9  CUSTOMER INTELLIGENCE" sub="from cashier tagging" />
         {segStats.length > 0 && (
           <div className="border-2 border-black p-4 mb-8">
             <div className="grid grid-cols-5 text-xs font-bold border-b-2 border-black pb-2 mb-2 bg-gray-50 pt-2 px-2 -mx-2">
@@ -793,8 +804,8 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {/* ══ §11 CUSTOMER VALUE MATRIX ════════════════════════════════════ */}
-        <SectionHeader title="§11  CUSTOMER VALUE MATRIX" sub="CRM: Segment Visit Frequency vs Average Check (RFM model)" />
+        {/* ══ §10 CUSTOMER VALUE MATRIX ════════════════════════════════════ */}
+        <SectionHeader title="§10  CUSTOMER VALUE MATRIX" sub="CRM: Segment Visit Frequency vs Average Check (RFM model)" />
         <div className="grid grid-cols-2 gap-px border-2 border-black mb-8 bg-black">
           {/* CHAMPIONS */}
           <div className="bg-white p-3 hover:bg-indigo-50">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { reportsService } from '@/lib/services/reports.service';
 import type { 
@@ -14,7 +14,8 @@ import type {
   ItemsDetailReport,
   PaymentDetailReport,
   UltimateReport,
-  UltimatePaymentDetail
+  UltimatePaymentDetail,
+  CategoryItemBreakdownReport
 } from '@/lib/services/reports.service';
 import { message } from 'antd';
 import type { SelectedModifier } from '@/types';
@@ -51,6 +52,7 @@ const REPORT_TYPES = [
   { value: 'items_summary', label: 'ITEMS SUMMARY (Full)' },
   { value: 'items_detail', label: 'DETAILED ITEMS LOG' },
   { value: 'payment_detail', label: 'DETAILED PAYMENT LOG' },
+  { value: 'category_breakdown', label: 'CATEGORY ITEM BREAKDOWN (Order vs Payment)' },
 ];
 
 export default function ReportsPage() {
@@ -68,9 +70,18 @@ export default function ReportsPage() {
     | ItemsDetailReport
     | PaymentDetailReport
     | UltimateReport
+    | CategoryItemBreakdownReport
     | null
   >(null);
   const [loading, setLoading] = useState(false);
+  const [categories, setCategories] = useState<{ id: string, name: string }[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
+
+  useEffect(() => {
+    import('@/lib/services/menu.service').then(({ menuService }) => {
+      menuService.getCategories().then(setCategories);
+    });
+  }, []);
 
   const handleGenerateReport = async () => {
     if (reportType === 'eod' && !startDate) {
@@ -122,6 +133,9 @@ export default function ReportsPage() {
           break;
         case 'ultimate':
           data = await reportsService.generateUltimateReport(start, end);
+          break;
+        case 'category_breakdown':
+          data = await reportsService.generateCategoryItemBreakdownReport(start, end, selectedCategory);
           break;
         default:
           throw new Error('Invalid report type');
@@ -218,6 +232,38 @@ export default function ReportsPage() {
         const a = document.createElement('a');
         a.href = url;
         a.download = `ultimate_report_${format(new Date(), 'yyyyMMdd')}.csv`;
+        a.click();
+        return;
+      }
+    }
+
+    if (reportType === 'category_breakdown' && reportData && 'groups' in reportData) {
+      const data = reportData as CategoryItemBreakdownReport;
+      const csvRows: Record<string, string | number>[] = [];
+      data.groups.forEach(group => {
+        group.items.forEach(item => {
+          csvRows.push({
+            'Category': group.categoryName,
+            'Item Name': item.itemName,
+            'Ordered Qty': item.orderedQty,
+            'Ordered Gross (THB)': item.orderedGross.toFixed(2),
+            'Paid Qty': item.paidQty,
+            'Paid Gross (THB)': item.paidGross.toFixed(2),
+            'Variance (THB)': (item.orderedGross - item.paidGross).toFixed(2),
+          });
+        });
+      });
+      if (csvRows.length > 0) {
+        const headers = Object.keys(csvRows[0]);
+        const csvContent = [
+          headers.join(','),
+          ...csvRows.map(row => headers.map(header => `"${(row[header] ?? '').toString().replace(/"/g, '""')}"`).join(','))
+        ].join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `category_breakdown_${format(new Date(), 'yyyyMMdd')}.csv`;
         a.click();
         return;
       }
@@ -587,6 +633,48 @@ export default function ReportsPage() {
       );
     }
 
+    if (reportType === 'category_breakdown' && 'groups' in reportData) {
+      const data = reportData as CategoryItemBreakdownReport;
+      return (
+        <div className="border-2 border-black p-4">
+          <h3 className="font-bold text-sm mb-3 uppercase">CATEGORY ITEM BREAKDOWN (Order vs Payment)</h3>
+          {data.groups.length === 0 && <p className="text-xs text-gray-500">No data found in this category.</p>}
+          {data.groups.map(group => (
+             <div key={group.categoryId} className="mb-6">
+                <div className="bg-black text-white p-2 flex justify-between font-bold text-sm">
+                   <span>{group.categoryName}</span>
+                   <span>Ordered: ฿{group.totalOrderedGross.toFixed(2)} | Paid: ฿{group.totalPaidGross.toFixed(2)}</span>
+                </div>
+                <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border border-black mt-2">
+                   <thead className="bg-gray-100 border-b border-black">
+                      <tr>
+                         <th className="p-2 border-r border-black">ITEM</th>
+                         <th className="p-2 border-r border-black text-right w-16">ORD. QTY</th>
+                         <th className="p-2 border-r border-black text-right w-24">ORD. GROSS</th>
+                         <th className="p-2 border-r border-black text-right text-green-700 w-16">PAID QTY</th>
+                         <th className="p-2 text-right text-green-700 w-24">PAID GROSS</th>
+                      </tr>
+                   </thead>
+                   <tbody>
+                      {group.items.sort((a,b) => b.orderedGross - a.orderedGross).map(item => (
+                         <tr key={item.menuItemId} className="border-b border-gray-300">
+                            <td className="p-1 border-r border-black">{item.itemName}</td>
+                            <td className="p-1 border-r border-black text-right">{item.orderedQty}</td>
+                            <td className="p-1 border-r border-black text-right font-bold">฿{item.orderedGross.toFixed(2)}</td>
+                            <td className="p-1 border-r border-black text-right text-green-700">{item.paidQty}</td>
+                            <td className="p-1 text-right font-bold text-green-700">฿{item.paidGross.toFixed(2)}</td>
+                         </tr>
+                      ))}
+                   </tbody>
+                </table>
+                </div>
+             </div>
+          ))}
+        </div>
+      );
+    }
+
     return null;
   };
 
@@ -630,17 +718,35 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold mb-2">REPORT TYPE</label>
-              <select
-                value={reportType}
-                onChange={(e) => setReportType(e.target.value)}
-                className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
-              >
-                {REPORT_TYPES.map((type) => (
-                  <option key={type.value} value={type.value}>{type.label}</option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold mb-2">REPORT TYPE</label>
+                <select
+                  value={reportType}
+                  onChange={(e) => setReportType(e.target.value)}
+                  className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
+                >
+                  {REPORT_TYPES.map((type) => (
+                    <option key={type.value} value={type.value}>{type.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {reportType === 'category_breakdown' && (
+                <div>
+                  <label className="block text-xs font-bold mb-2 text-indigo-700">POPUP STORE CATEGORY FILTER</label>
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="w-full px-3 py-2 border-2 border-indigo-700 text-sm focus:outline-none"
+                  >
+                    <option value="ALL">★ ALL CATEGORIES ★</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             <button

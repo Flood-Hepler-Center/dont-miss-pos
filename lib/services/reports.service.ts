@@ -130,6 +130,27 @@ export interface PaymentMethodsReport {
   card: { count: number; total: number };
 }
 
+export interface CategoryBreakdownGroup {
+  categoryId: string;
+  categoryName: string;
+  totalOrderedQty: number;
+  totalOrderedGross: number;
+  totalPaidQty: number;
+  totalPaidGross: number;
+  items: Array<{
+    menuItemId: string;
+    itemName: string;
+    orderedQty: number;
+    orderedGross: number;
+    paidQty: number;
+    paidGross: number;
+  }>;
+}
+
+export interface CategoryItemBreakdownReport {
+  groups: CategoryBreakdownGroup[];
+}
+
 export const reportsService = {
   /**
    * Generate End of Day report
@@ -678,6 +699,110 @@ export const reportsService = {
       return { payments: result.sort((a, b) => b.processedAt.localeCompare(a.processedAt)) };
     } catch (error) {
       console.error('Error generating ultimate report:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Generate Category Item Breakdown report
+   */
+  async generateCategoryItemBreakdownReport(startDate: Date, endDate: Date, filterCategoryId?: string): Promise<CategoryItemBreakdownReport> {
+    try {
+      // 1. Fetch Orders in date range
+      const ordersQuery = query(
+        collection(db, 'orders'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+      const ordersSnapshot = await getDocs(ordersQuery);
+      const orders = ordersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+
+      // 2. Fetch Payments to identify paid orders
+      const paymentsQuery = query(
+        collection(db, 'payments'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+      const paymentsSnapshot = await getDocs(paymentsQuery);
+      const payments = paymentsSnapshot.docs
+        .map(doc => doc.data())
+        .filter(p => p.status === 'COMPLETED');
+      const paidOrderIds = new Set(payments.flatMap(p => p.orderIds || []));
+
+      // 3. Fetch Menu Items & Categories for lookup
+      const menuItemsMap = new Map();
+      const menuItemsSnapshot = await getDocs(collection(db, 'menuItems'));
+      menuItemsSnapshot.docs.forEach(doc => { menuItemsMap.set(doc.id, doc.data()); });
+
+      const categoriesMap = new Map();
+      const categoriesSnapshot = await getDocs(collection(db, 'menuCategories'));
+      categoriesSnapshot.docs.forEach(doc => { categoriesMap.set(doc.id, doc.data().name); });
+
+      // 4. Aggregate Data
+      const catMap = new Map<string, CategoryBreakdownGroup>();
+
+      orders.forEach(order => {
+        order.items?.forEach(item => {
+          if (item.isVoided) return;
+
+          const menuItem = menuItemsMap.get(item.menuItemId);
+          const catId = menuItem?.categoryId || 'UNCATEGORISED';
+          
+          if (filterCategoryId && filterCategoryId !== 'ALL' && catId !== filterCategoryId) {
+            return;
+          }
+
+          const catName = catId === 'UNCATEGORISED' ? 'Uncategorized' : (categoriesMap.get(catId) || 'Uncategorized');
+
+          let group = catMap.get(catId);
+          if (!group) {
+            group = {
+              categoryId: catId,
+              categoryName: catName,
+              totalOrderedQty: 0,
+              totalOrderedGross: 0,
+              totalPaidQty: 0,
+              totalPaidGross: 0,
+              items: [],
+            };
+            catMap.set(catId, group);
+          }
+
+          let itemStats = group.items.find(i => i.menuItemId === item.menuItemId);
+          if (!itemStats) {
+            itemStats = {
+              menuItemId: item.menuItemId,
+              itemName: item.name,
+              orderedQty: 0,
+              orderedGross: 0,
+              paidQty: 0,
+              paidGross: 0,
+            };
+            group.items.push(itemStats);
+          }
+
+          const itemGross = item.subtotal || (item.price * item.quantity);
+          const isPaid = paidOrderIds.has(order.id);
+
+          itemStats.orderedQty += item.quantity;
+          itemStats.orderedGross += itemGross;
+          group.totalOrderedQty += item.quantity;
+          group.totalOrderedGross += itemGross;
+
+          if (isPaid) {
+            itemStats.paidQty += item.quantity;
+            itemStats.paidGross += itemGross;
+            group.totalPaidQty += item.quantity;
+            group.totalPaidGross += itemGross;
+          }
+        });
+      });
+
+      return {
+        groups: Array.from(catMap.values()).sort((a, b) => b.totalOrderedGross - a.totalOrderedGross),
+      };
+    } catch (error) {
+      console.error('Error generating category item breakdown report:', error);
       throw error;
     }
   },

@@ -31,6 +31,28 @@ export const menuService = {
     }
   },
 
+  async getAllItems(): Promise<MenuItem[]> {
+    try {
+      const q = query(collection(db, 'menuItems'));
+      const snapshot = await getDocs(q);
+      const items = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as MenuItem[];
+      
+      // Sort client-side
+      return items.sort((a, b) => {
+        const orderA = a.displayOrder || 999;
+        const orderB = b.displayOrder || 999;
+        if (orderA !== orderB) return orderA - orderB;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+    } catch (error) {
+      console.error('Error fetching all items:', error);
+      return [];
+    }
+  },
+
   async getActiveItems(): Promise<MenuItem[]> {
     try {
       const q = query(
