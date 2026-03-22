@@ -245,10 +245,10 @@ export const paymentService = {
       );
       const snapshot = await getDocs(q);
 
-      return snapshot.docs.map((doc) => ({
+      return (snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
-      })) as Payment[];
+      })) as Payment[]).filter((p) => !p.isDeleted);
     } catch (error) {
       console.error('Error fetching payments by date:', error);
       throw new Error('Failed to fetch payments');

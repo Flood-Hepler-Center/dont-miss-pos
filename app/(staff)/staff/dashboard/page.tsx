@@ -25,10 +25,9 @@ export default function StaffDashboardPage() {
     );
 
     const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
-      const orders = snapshot.docs.map((doc) => ({
+      const orders = (snapshot.docs.map((doc) => ({
         id: doc.id,
-        ...doc.data(),
-      })) as Order[];
+      })) as Order[]).filter((o) => !o.isDeleted);
 
       // Count take-away orders
       const takeAwayOrders = orders.filter(o => o.orderType === 'TAKE_AWAY');
@@ -73,6 +72,7 @@ export default function StaffDashboardPage() {
       let revenue = 0;
       snapshot.docs.forEach((doc) => {
         const payment = doc.data();
+        if ((payment as { isDeleted?: boolean }).isDeleted) return;
         const createdAt = payment.createdAt?.toMillis?.() || 0;
         if (createdAt >= todayTimestamp) {
           revenue += payment.total || 0;
@@ -105,6 +105,7 @@ export default function StaffDashboardPage() {
 
       snapshot.docs.forEach((doc) => {
         const order = doc.data();
+        if ((order as Order).isDeleted) return;
         const createdAt = order.createdAt?.toMillis?.() || 0;
         const readyAt = order.readyAt?.toMillis?.() || order.updatedAt?.toMillis?.() || 0;
         

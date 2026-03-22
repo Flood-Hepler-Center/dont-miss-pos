@@ -211,7 +211,9 @@ export const orderService = {
       const docRef = doc(db, 'orders', id);
       const docSnap = await getDoc(docRef);
       if (!docSnap.exists()) return null;
-      return { id: docSnap.id, ...docSnap.data() } as Order;
+      const data = docSnap.data();
+      if (data.isDeleted) return null;
+      return { id: docSnap.id, ...data } as Order;
     } catch (error) {
       console.error('Error fetching order:', error);
       return null;
@@ -226,7 +228,7 @@ export const orderService = {
         where('status', 'in', ['PLACED', 'PREPARING', 'READY'])
       );
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)).filter(o => !o.isDeleted);
     } catch (error) {
       console.error('Error fetching orders by table:', error);
       return [];
@@ -492,7 +494,7 @@ export const orderService = {
         where('status', 'in', ['PLACED', 'PREPARING', 'READY'])
       );
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)).filter(o => !o.isDeleted);
     } catch (error) {
       console.error('Error fetching orders by type:', error);
       return [];
@@ -507,7 +509,7 @@ export const orderService = {
         where('status', 'in', ['PLACED', 'PREPARING', 'READY'])
       );
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)).filter(o => !o.isDeleted);
     } catch (error) {
       console.error('Error fetching pending take-aways:', error);
       return [];
@@ -522,7 +524,7 @@ export const orderService = {
         where('status', 'in', ['READY', 'COMPLETED'])
       );
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)).filter(o => !o.isDeleted);
     } catch (error) {
       console.error('Error fetching take-aways for cashier:', error);
       return [];
@@ -540,7 +542,7 @@ export const orderService = {
         where('status', 'in', ['PLACED', 'PREPARING', 'READY', 'SERVED'])
       );
       const snapshot = await getDocs(q);
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)).filter(o => !o.isDeleted);
       // Sort in memory to avoid composite index requirement
       return orders.sort((a, b) => {
         // Handle both Firestore Timestamp and Date types
@@ -577,7 +579,7 @@ export const orderService = {
     return onSnapshot(
       q,
       (snapshot) => {
-        const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+        const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)).filter(o => !o.isDeleted);
         // Sort in memory to avoid composite index requirement
         const sortedOrders = orders.sort((a, b) => {
           // Handle both Firestore Timestamp and Date types
@@ -617,7 +619,7 @@ export const orderService = {
     return onSnapshot(
       q,
       (snapshot) => {
-        const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+        const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)).filter(o => !o.isDeleted);
         callback(orders);
       },
       (error) => {

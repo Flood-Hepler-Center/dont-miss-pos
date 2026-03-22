@@ -16,11 +16,11 @@ export default function AdminPaymentsPage() {
   useEffect(() => {
     const q = query(collection(db, 'payments'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const paymentsData = snapshot.docs.map(doc => ({
+      const paymentsData = (snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         createdAt: (doc.data().createdAt as Timestamp)?.toDate() || new Date(),
-      })) as Payment[];
+      })) as Payment[]).filter((p) => !p.isDeleted);
       setPayments(paymentsData);
     });
 

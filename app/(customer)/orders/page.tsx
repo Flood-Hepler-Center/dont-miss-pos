@@ -29,10 +29,10 @@ export default function CustomerOrdersPage() {
     );
 
     const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
-      const fetchedOrders = snapshot.docs.map(doc => ({
+      const fetchedOrders = (snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
-      })) as Order[];
+      })) as Order[]).filter((o) => !o.isDeleted);
       
       setOrders(fetchedOrders);
       setLoading(false);

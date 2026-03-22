@@ -23,6 +23,7 @@ export interface EODReport {
 
 export interface DetailedOrder {
   id: string;
+  isDeleted?: boolean;
   tableId: string;
   createdAt: string;
   status: string;
@@ -70,6 +71,7 @@ export interface ItemsDetailReport {
 
 export interface DetailedPayment {
   id: string;
+  isDeleted?: boolean;
   receiptNumber: string;
   tableId: string;
   processedAt: string;
@@ -170,7 +172,7 @@ export const reportsService = {
         where('createdAt', '<=', Timestamp.fromDate(endOfDay))
       );
       const paymentsSnapshot = await getDocs(paymentsQuery);
-      const payments = paymentsSnapshot.docs.map(doc => doc.data());
+      const payments = (paymentsSnapshot.docs.map(doc => doc.data()) as Payment[]).filter(p => !p.isDeleted);
 
       let totalRevenue = 0;
       let totalDiscounts = 0;
@@ -203,7 +205,7 @@ export const reportsService = {
         where('createdAt', '<=', Timestamp.fromDate(endOfDay))
       );
       const ordersSnapshot = await getDocs(ordersQuery);
-      const orders = ordersSnapshot.docs.map(doc => doc.data() as Order);
+      const orders = (ordersSnapshot.docs.map(doc => doc.data()) as Order[]).filter(o => !o.isDeleted);
       const completedOrders = orders.filter(o => o.status !== 'CANCELLED');
 
       const avgOrderValue = completedOrders.length > 0 ? totalRevenue / completedOrders.length : 0;
@@ -237,9 +239,8 @@ export const reportsService = {
         where('createdAt', '<=', Timestamp.fromDate(endDate))
       );
       const paymentsSnapshot = await getDocs(paymentsQuery);
-      const payments = paymentsSnapshot.docs
-        .map(doc => doc.data())
-        .filter(p => p.status !== 'VOIDED');
+      const payments = (paymentsSnapshot.docs.map(doc => doc.data()) as Payment[])
+        .filter(p => p.status !== 'VOIDED' && !p.isDeleted);
 
       let totalRevenue = 0;
       const dailyRevenueMap = new Map<string, number>();
@@ -258,7 +259,7 @@ export const reportsService = {
         where('createdAt', '<=', Timestamp.fromDate(endDate))
       );
       const ordersSnapshot = await getDocs(ordersQuery);
-      const orders = ordersSnapshot.docs.map(doc => doc.data() as Order);
+      const orders = (ordersSnapshot.docs.map(doc => doc.data()) as Order[]).filter(o => !o.isDeleted);
 
       const completedOrdersCount = orders.filter(o => ['COMPLETED', 'SERVED'].includes(o.status)).length;
       const cancelledOrdersCount = orders.filter(o => o.status === 'CANCELLED').length;
@@ -307,9 +308,9 @@ export const reportsService = {
       );
 
       const snapshot = await getDocs(q);
-      const orders = snapshot.docs
-        .map(doc => doc.data() as Order)
-        .filter(o => ['COMPLETED', 'SERVED'].includes(o.status));
+      const orders = (snapshot.docs
+        .map(doc => doc.data()) as Order[])
+        .filter(o => ['COMPLETED', 'SERVED'].includes(o.status) && !o.isDeleted);
 
       // Aggregate items
       const itemMap = new Map<string, { quantity: number; revenue: number }>();
@@ -354,9 +355,9 @@ export const reportsService = {
       );
 
       const ordersSnapshot = await getDocs(ordersQuery);
-      const orders = ordersSnapshot.docs
-        .map(doc => doc.data() as Order)
-        .filter(o => ['COMPLETED', 'SERVED'].includes(o.status));
+      const orders = (ordersSnapshot.docs
+        .map(doc => doc.data()) as Order[])
+        .filter(o => ['COMPLETED', 'SERVED'].includes(o.status) && !o.isDeleted);
 
       // Fetch menu items to get categories
       const menuItemsSnapshot = await getDocs(collection(db, 'menuItems'));
@@ -419,9 +420,9 @@ export const reportsService = {
       );
 
       const snapshot = await getDocs(q);
-      const payments = snapshot.docs
-        .map(doc => doc.data())
-        .filter(p => p.status !== 'VOIDED');
+      const payments = (snapshot.docs
+        .map(doc => doc.data()) as Payment[])
+        .filter(p => p.status !== 'VOIDED' && !p.isDeleted);
 
       const result: PaymentMethodsReport = {
         cash: { count: 0, total: 0 },
@@ -464,7 +465,7 @@ export const reportsService = {
       );
 
       const snapshot = await getDocs(q);
-      const orders = snapshot.docs.map(doc => {
+      const orders = (snapshot.docs.map(doc => {
         const data = doc.data() as Order;
         const createdAt = data.createdAt instanceof Timestamp 
           ? data.createdAt.toDate().toISOString() 
@@ -483,7 +484,7 @@ export const reportsService = {
           itemsCount: data.items?.reduce((acc, item) => acc + (item.isVoided ? 0 : item.quantity), 0) || 0,
           itemsNames: data.items?.filter(i => !i.isVoided).map(i => `${i.name} (x${i.quantity})`).join('; ') || '',
         };
-      });
+      }) as DetailedOrder[]).filter(o => !o.isDeleted);
 
       return { orders: orders.sort((a, b) => b.createdAt.localeCompare(a.createdAt)) };
     } catch (error) {
@@ -506,9 +507,9 @@ export const reportsService = {
 
       const ordersSnapshot = await getDocs(ordersQuery);
       // Filter by status in-memory
-      const orders = ordersSnapshot.docs
-        .map(doc => doc.data() as Order)
-        .filter(o => ['COMPLETED', 'SERVED'].includes(o.status));
+      const orders = (ordersSnapshot.docs
+        .map(doc => doc.data()) as Order[])
+        .filter(o => ['COMPLETED', 'SERVED'].includes(o.status) && !o.isDeleted);
 
       // Fetch menu items to get categories
       const menuItemsSnapshot = await getDocs(collection(db, 'menuItems'));
@@ -568,7 +569,7 @@ export const reportsService = {
       );
 
       const snapshot = await getDocs(q);
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const orders = (snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Order[]).filter(o => !o.isDeleted);
 
       const items: ItemDetail[] = [];
 
@@ -612,7 +613,7 @@ export const reportsService = {
       );
 
       const snapshot = await getDocs(q);
-      const payments = snapshot.docs.map(doc => {
+      const payments = (snapshot.docs.map(doc => {
         const data = doc.data();
         const processedAt = data.processedAt instanceof Timestamp 
           ? data.processedAt.toDate().toISOString() 
@@ -631,7 +632,7 @@ export const reportsService = {
           status: data.status || 'N/A',
           orderIds: data.orderIds?.join('; ') || '',
         };
-      });
+      }) as DetailedPayment[]).filter(p => !p.isDeleted);
 
       return { payments: payments.sort((a, b) => b.processedAt.localeCompare(a.processedAt)) };
     } catch (error) {
@@ -652,10 +653,10 @@ export const reportsService = {
         where('createdAt', '<=', Timestamp.fromDate(endDate))
       );
       const paymentsSnapshot = await getDocs(paymentsQuery);
-      const paymentsData = paymentsSnapshot.docs.map(doc => {
+      const paymentsData = (paymentsSnapshot.docs.map(doc => {
         const data = doc.data() as Payment;
         return { ...data, id: doc.id };
-      });
+      }) as Payment[]).filter(p => !p.isDeleted);
 
       // 2. Fetch orders for range (to avoid many individual fetches)
       const ordersQuery = query(
@@ -665,9 +666,11 @@ export const reportsService = {
       );
       const ordersSnapshot = await getDocs(ordersQuery);
       const ordersMap = new Map<string, Order & { id: string }>();
-      ordersSnapshot.docs.forEach(doc => {
+      (ordersSnapshot.docs.map(doc => {
         const data = doc.data() as Order;
-        ordersMap.set(doc.id, { ...data, id: doc.id });
+        return { ...data, id: doc.id };
+      }) as (Order & { id: string })[]).filter(o => !o.isDeleted).forEach(doc => {
+        ordersMap.set(doc.id, doc);
       });
 
       // 3. Merge
@@ -715,7 +718,7 @@ export const reportsService = {
         where('createdAt', '<=', Timestamp.fromDate(endDate))
       );
       const ordersSnapshot = await getDocs(ordersQuery);
-      const orders = ordersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const orders = (ordersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Order[]).filter(o => !o.isDeleted);
 
       // 2. Fetch Payments to identify paid orders
       const paymentsQuery = query(

@@ -29,10 +29,10 @@ export default function AdminDashboard() {
     );
 
     const unsubscribe = onSnapshot(paymentsQuery, (snapshot) => {
-      const payments = snapshot.docs.map((doc) => ({
+      const payments = (snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
-      })) as Payment[];
+      })) as Payment[]).filter((p) => !p.isDeleted);
 
       const totalRevenue = payments.reduce((sum, p) => sum + (p.total || 0), 0);
       const totalOrders = payments.length;
@@ -69,7 +69,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ordersData = snapshot.docs.map((doc) => {
+      const ordersData = (snapshot.docs.map((doc) => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -77,7 +77,7 @@ export default function AdminDashboard() {
           createdAt: data.createdAt?.toDate?.() || new Date(),
           updatedAt: data.updatedAt?.toDate?.() || new Date(),
         };
-      }) as Order[];
+      }) as Order[]).filter((o) => !o.isDeleted);
       setRecentOrders(ordersData.slice(0, 5));
     });
 

@@ -143,17 +143,17 @@ export default function KDSPage() {
 
   useEffect(() => {
     const q = query(collection(db, 'orders'), where('status', '==', 'PLACED'));
-    return onSnapshot(q, (s) => setPlacedOrders(s.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]));
+    return onSnapshot(q, (s) => setPlacedOrders((s.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]).filter((o) => !o.isDeleted)));
   }, []);
 
   useEffect(() => {
     const q = query(collection(db, 'orders'), where('status', '==', 'PREPARING'));
-    return onSnapshot(q, (s) => setPreparingOrders(s.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]));
+    return onSnapshot(q, (s) => setPreparingOrders((s.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]).filter((o) => !o.isDeleted)));
   }, []);
 
   useEffect(() => {
     const q = query(collection(db, 'orders'), where('status', '==', 'READY'));
-    return onSnapshot(q, (s) => setReadyOrders(s.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]));
+    return onSnapshot(q, (s) => setReadyOrders((s.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]).filter((o) => !o.isDeleted)));
   }, []);
 
   useEffect(() => { menuService.getActiveItems().then(setMenuItems); }, []);

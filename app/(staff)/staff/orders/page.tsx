@@ -23,10 +23,9 @@ export default function OrdersPage() {
   useEffect(() => {
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ordersData = snapshot.docs.map((doc) => ({
+      const ordersData = (snapshot.docs.map((doc) => ({
         id: doc.id,
-        ...doc.data(),
-      })) as Order[];
+      })) as Order[]).filter((o) => !o.isDeleted);
       setOrders(ordersData);
       setFilteredOrders(ordersData);
     });

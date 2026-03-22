@@ -88,6 +88,8 @@ export type Order = {
   voidedBy?: string;
   voidedAt?: Date;
   specialInstructions?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 };
 
 /** Input for creating a new order */

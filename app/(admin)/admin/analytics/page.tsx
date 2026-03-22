@@ -33,6 +33,7 @@ interface PaymentDoc {
   processedBy?: string;
   amountReceived?: number;
   change?: number;
+  isDeleted?: boolean;
   processedAt: Date;
   createdAt: Date;
 }
@@ -108,7 +109,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     const uO = onSnapshot(
       query(collection(db, 'orders'), orderBy('createdAt', 'desc')),
-      (snap) => setOrders(snap.docs.map(d => {
+      (snap) => setOrders((snap.docs.map(d => {
         const x = d.data();
         return {
           id: d.id, ...x,
@@ -120,12 +121,12 @@ export default function AnalyticsPage() {
           servedAt: x.servedAt ? toDate(x.servedAt) : undefined,
           completedAt: x.completedAt ? toDate(x.completedAt) : undefined,
         } as Order;
-      }))
+      }) as Order[]).filter((x) => !x.isDeleted))
     );
     const uP = onSnapshot(
       query(collection(db, 'payments'), orderBy('createdAt', 'desc')),
       (snap) => {
-        setPayments(snap.docs.map(d => {
+        setPayments((snap.docs.map(d => {
           const x = d.data();
           return {
             id: d.id,
@@ -145,7 +146,7 @@ export default function AnalyticsPage() {
             processedAt: toDate(x.processedAt || x.createdAt),
             createdAt: toDate(x.createdAt),
           } as PaymentDoc;
-        }));
+        }) as PaymentDoc[]).filter((x) => !x.isDeleted));
         setLoading(false);
       }
     );

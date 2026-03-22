@@ -44,6 +44,8 @@ export type Payment = {
   processedBy: string;
   processedAt: Date;
   status: PaymentStatus;
+  isDeleted?: boolean;
+  deletedAt?: string;
   createdAt: Date;
 };
 
