@@ -27,6 +27,7 @@ export default function StaffDashboardPage() {
     const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
       const orders = (snapshot.docs.map((doc) => ({
         id: doc.id,
+        ...doc.data()
       })) as Order[]).filter((o) => !o.isDeleted);
 
       // Count take-away orders
