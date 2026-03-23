@@ -182,7 +182,7 @@ export const recipeService = {
       // STEP 2: Execute transaction with all inventory reads and writes
       // Now all reads use transaction.get() and happen before writes
       await runTransaction(db, async (transaction) => {
-        const inventoryDocs = new Map<string, { ref: any, data: InventoryItem, cumulativeDeduction: number }>();
+        const inventoryDocs = new Map<string, { ref: ReturnType<typeof doc>, data: InventoryItem, cumulativeDeduction: number }>();
         const movements: StockMovement[] = [];
 
         // PHASE 2a: Perform all reads
