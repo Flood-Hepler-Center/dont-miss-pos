@@ -25,6 +25,7 @@ export type InventoryItem = {
   name: string;
   category: InventoryCategory;
   unit: string;
+  unitSize?: string;
   currentStock: number;
   initialStock: number;
   reorderPoint: number;
@@ -102,6 +103,7 @@ export type CreateInventoryItemInput = {
   name: string;
   category: InventoryCategory;
   unit: string;
+  unitSize?: string;
   initialStock: number;
   reorderPoint: number;
   unitCost: number;

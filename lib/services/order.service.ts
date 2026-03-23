@@ -628,4 +628,20 @@ export const orderService = {
       }
     );
   },
+
+  async softDelete(orderId: string, staffId: string): Promise<void> {
+    try {
+      const orderRef = doc(db, 'orders', orderId);
+      await updateDoc(orderRef, {
+        isDeleted: true,
+        deletedAt: serverTimestamp(),
+        deletedBy: staffId,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error soft deleting order:', error);
+      throw error;
+    }
+  },
 };
+

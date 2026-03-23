@@ -164,15 +164,7 @@ export const recipeService = {
         // Validate recipe.yield to prevent NaN
         const recipeYield = recipe.yield || 1;
         if (recipeYield <= 0 || recipe.yield === undefined) {
-          console.error(`❌ Recipe yield check for ${item.name}:`, { 
-            yield: recipe.yield, 
-            fallbackYield: recipeYield,
-            recipeId: recipe.id 
-          });
-          if (recipeYield <= 0) {
-            console.error(`❌ Invalid recipe yield for ${item.name}: ${recipeYield}. Recipe must have yield > 0. Skipping inventory deduction.`);
-            continue;
-          }
+          console.warn(`⚠️ Invalid recipe yield for ${item.name}: ${recipeYield}. Recipe must have yield > 0. Using fallback yield of 1.`);
         }
 
         // Calculate recipe multiplier from modifiers
@@ -190,18 +182,32 @@ export const recipeService = {
       // STEP 2: Execute transaction with all inventory reads and writes
       // Now all reads use transaction.get() and happen before writes
       await runTransaction(db, async (transaction) => {
+        const inventoryDocs = new Map<string, { ref: any, data: InventoryItem, cumulativeDeduction: number }>();
         const movements: StockMovement[] = [];
 
+        // PHASE 2a: Perform all reads
+        for (const { recipe } of recipeData) {
+          for (const ingredient of recipe.ingredients) {
+            if (!inventoryDocs.has(ingredient.inventoryItemId)) {
+              const inventoryRef = doc(db, 'inventory', ingredient.inventoryItemId);
+              const inventoryDoc = await transaction.get(inventoryRef);
+              if (inventoryDoc.exists()) {
+                inventoryDocs.set(ingredient.inventoryItemId, {
+                  ref: inventoryRef,
+                  data: inventoryDoc.data() as InventoryItem,
+                  cumulativeDeduction: 0,
+                });
+              }
+            }
+          }
+        }
+
+        // PHASE 2b: Process deductions in memory
         for (const { item, recipe, recipeMultiplier } of recipeData) {
           for (const ingredient of recipe.ingredients) {
-            const inventoryRef = doc(db, 'inventory', ingredient.inventoryItemId);
-            const inventoryDoc = await transaction.get(inventoryRef);
+            const context = inventoryDocs.get(ingredient.inventoryItemId);
+            if (!context) continue;
 
-            if (!inventoryDoc.exists()) {
-              continue;
-            }
-
-            const inventoryItem = inventoryDoc.data() as InventoryItem;
             const recipeYield = recipe.yield || 1;
             const deductQty = (ingredient.quantity * item.quantity * recipeMultiplier) / recipeYield;
             
@@ -209,17 +215,10 @@ export const recipeService = {
             if (!Number.isFinite(deductQty) || deductQty < 0) {
               continue;
             }
-            
-            const newStock = inventoryItem.currentStock - deductQty;
-            // NOTE: Negative stock is intentionally allowed here.
-            // Real-world recipe usage has ±10–15% variance so inventory
-            // is best-effort tracking only. Orders are never blocked by
-            // recipe-layer stock — only item-level hasStockTracking does that.
 
-            transaction.update(inventoryRef, {
-              currentStock: newStock,
-              updatedAt: serverTimestamp(),
-            });
+            const previousStock = context.data.currentStock - context.cumulativeDeduction;
+            context.cumulativeDeduction += deductQty;
+            const newStock = previousStock - deductQty;
 
             movements.push({
               id: '',
@@ -231,9 +230,23 @@ export const recipeService = {
               reason: `Order ${orderId} - ${item.name} x${item.quantity}`,
               relatedOrderId: orderId,
               performedBy: 'system',
-              timestamp: new Date(),
-              previousStock: inventoryItem.currentStock,
+              timestamp: new Date(), // Local fallback, will be replaced in rendering if needed
+              previousStock,
               newStock,
+            });
+          }
+        }
+
+        // PHASE 2c: Perform all writes
+        for (const context of Array.from(inventoryDocs.values())) {
+          if (context.cumulativeDeduction > 0) {
+            // NOTE: Negative stock is intentionally allowed here.
+            // Real-world recipe usage has ±10–15% variance so inventory
+            // is best-effort tracking only. Orders are never blocked by
+            // recipe-layer stock — only item-level hasStockTracking does that.
+            transaction.update(context.ref, {
+              currentStock: context.data.currentStock - context.cumulativeDeduction,
+              updatedAt: serverTimestamp(),
             });
           }
         }

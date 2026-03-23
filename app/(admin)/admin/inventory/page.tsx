@@ -11,6 +11,7 @@ interface InventoryItem {
   initialStock: number;
   reorderPoint: number;
   unit: string;
+  unitSize?: string;
   costPerUnit: number;
 }
 
@@ -27,6 +28,7 @@ export default function InventoryPage() {
     name: '',
     initialStock: 0,
     unit: 'kg',
+    unitSize: '',
     reorderPoint: 0,
     costPerUnit: 0,
   });
@@ -43,6 +45,7 @@ export default function InventoryPage() {
           initialStock: data.initialStock,
           reorderPoint: data.reorderPoint,
           unit: data.unit,
+          unitSize: data.unitSize || '',
           costPerUnit: data.costPerUnit,
         } as InventoryItem;
       });
@@ -63,7 +66,7 @@ export default function InventoryPage() {
 
   const handleAdd = () => {
     setEditingItem(null);
-    setItemForm({ name: '', initialStock: 0, unit: 'kg', reorderPoint: 0, costPerUnit: 0 });
+    setItemForm({ name: '', initialStock: 0, unit: 'kg', unitSize: '', reorderPoint: 0, costPerUnit: 0 });
     setCrudModalVisible(true);
   };
 
@@ -73,6 +76,7 @@ export default function InventoryPage() {
       name: item.name,
       initialStock: item.initialStock,
       unit: item.unit,
+      unitSize: item.unitSize || '',
       reorderPoint: item.reorderPoint,
       costPerUnit: item.costPerUnit,
     });
@@ -109,7 +113,7 @@ export default function InventoryPage() {
         });
       }
       setCrudModalVisible(false);
-      setItemForm({ name: '', initialStock: 0, unit: 'kg', reorderPoint: 0, costPerUnit: 0 });
+      setItemForm({ name: '', initialStock: 0, unit: 'kg', unitSize: '', reorderPoint: 0, costPerUnit: 0 });
     } catch (error) {
       console.error('Error saving inventory:', error);
       alert('Failed to save item');
@@ -217,6 +221,7 @@ export default function InventoryPage() {
                       <div className="font-bold">{item.name}</div>
                       <div className={isOut ? 'text-red-600 font-bold' : isLow ? 'text-orange-600 font-bold' : ''}>
                         {item.currentStock} {item.unit}
+                        {item.unitSize && <div className="text-xs text-gray-500 font-normal">({item.unitSize}/unit)</div>}
                       </div>
                       <div>
                         <div className="w-full bg-gray-200 h-2 border border-black">
@@ -275,6 +280,7 @@ export default function InventoryPage() {
                       <p className="font-bold text-sm">{item.name}</p>
                       <p className={`text-xs ${isOut ? 'text-red-600 font-bold' : isLow ? 'text-orange-600 font-bold' : 'text-gray-600'}`}>
                         {item.currentStock} / {item.initialStock} {item.unit}
+                        {item.unitSize && <span> ({item.unitSize}/unit)</span>}
                       </p>
                     </div>
                     <span className={`px-2 py-1 border border-black text-xs ${isOut ? 'bg-red-50' : isLow ? 'bg-orange-50' : ''}`}>
@@ -368,6 +374,16 @@ export default function InventoryPage() {
                       required
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-2">UNIT SIZE (optional)</label>
+                  <input
+                    type="text"
+                    value={itemForm.unitSize}
+                    onChange={(e) => setItemForm({ ...itemForm, unitSize: e.target.value })}
+                    className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
+                    placeholder="e.g., 900g, 2L, 1 Box"
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>

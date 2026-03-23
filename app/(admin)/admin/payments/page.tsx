@@ -5,6 +5,7 @@ import { collection, onSnapshot, query, orderBy, doc, getDoc, Timestamp } from '
 import { db } from '@/lib/firebase/config';
 import { format } from 'date-fns';
 import type { Payment, Order, SelectedModifier } from '@/types';
+import { paymentService } from '@/lib/services/payment.service';
 
 export default function AdminPaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -12,6 +13,7 @@ export default function AdminPaymentsPage() {
   const [linkedOrders, setLinkedOrders] = useState<Order[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'payments'), orderBy('createdAt', 'desc'));
@@ -26,6 +28,17 @@ export default function AdminPaymentsPage() {
 
     return () => unsubscribe();
   }, []);
+
+  const handleDeletePayment = async (paymentId: string) => {
+    try {
+      await paymentService.softDelete(paymentId, 'admin');
+      setModalVisible(false);
+      setDeleteConfirm(null);
+    } catch (error) {
+      console.error('Error deleting payment:', error);
+      alert('Failed to delete payment transaction.');
+    }
+  };
 
   const handleFetchDetails = async (payment: Payment) => {
     setSelectedPayment(payment);
@@ -94,12 +107,18 @@ export default function AdminPaymentsPage() {
                     </div>
                     <div className="text-right text-gray-500">฿{payment.subtotal.toFixed(2)}</div>
                     <div className="text-right font-bold">฿{payment.total.toFixed(2)}</div>
-                    <div className="text-center">
+                    <div className="text-center flex justify-center gap-2">
                       <button
                         onClick={() => handleFetchDetails(payment)}
                         className="px-3 py-1 border-2 border-black text-xs font-bold hover:bg-black hover:text-white transition-all transform hover:-translate-y-0.5 active:translate-y-0"
                       >
                         [VIEW]
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirm(payment.id)}
+                        className="px-3 py-1 border-2 border-black text-xs font-bold text-red-600 hover:bg-red-50 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
+                      >
+                        [DEL]
                       </button>
                     </div>
                   </div>
@@ -123,12 +142,20 @@ export default function AdminPaymentsPage() {
                    <span className="text-[10px] font-bold px-1.5 py-0.5 border border-black uppercase">
                     {payment.paymentMethod}
                   </span>
-                  <button
-                    onClick={() => handleFetchDetails(payment)}
-                    className="px-4 py-1.5 border-2 border-black text-xs font-bold bg-white active:bg-black active:text-white"
-                  >
-                    [DETAILS]
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleFetchDetails(payment)}
+                      className="px-4 py-1.5 border-2 border-black text-xs font-bold bg-white active:bg-black active:text-white"
+                    >
+                      [DETAILS]
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirm(payment.id)}
+                      className="px-4 py-1.5 border-2 border-black text-xs font-bold text-red-600 bg-white active:bg-red-600 active:text-white"
+                    >
+                      [DEL]
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -225,6 +252,34 @@ export default function AdminPaymentsPage() {
                     className="w-full py-3 border-4 border-black bg-black text-white font-bold hover:bg-white hover:text-black transition-all uppercase text-sm active:scale-95"
                   >
                     CLOSE RECORD
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {deleteConfirm && (
+          <div className="fixed inset-0 bg-black/50 z-[110] flex items-center justify-center p-4">
+            <div className="bg-white border-2 border-black max-w-md w-full font-mono">
+              <div className="border-b-2 border-black p-4">
+                <h2 className="text-lg font-bold text-center text-red-600">[DELETE PAYMENT?]</h2>
+              </div>
+              <div className="p-4">
+                <p className="text-sm text-center mb-6">Are you sure you want to delete this payment record? This action will mark it as deleted.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setDeleteConfirm(null)}
+                    className="px-6 py-3 border-2 border-black bg-white text-black font-bold text-sm hover:bg-gray-100"
+                  >
+                    [NO, CANCEL]
+                  </button>
+                  <button
+                    onClick={() => handleDeletePayment(deleteConfirm)}
+                    className="px-6 py-3 border-2 border-black bg-red-600 text-white font-bold text-sm hover:bg-red-700"
+                  >
+                    [YES, DELETE]
                   </button>
                 </div>
               </div>

@@ -19,6 +19,7 @@ export default function OrdersPage() {
   const [tableStatusFilter, setTableStatusFilter] = useState<'all' | 'hasTable' | 'noTable'>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
@@ -73,6 +74,17 @@ export default function OrdersPage() {
     } catch (error) {
       console.error('Error cancelling order:', error);
       message.error('Failed to cancel order');
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    try {
+      await orderService.softDelete(orderId, 'staff');
+      setModalVisible(false);
+      setDeleteConfirm(null);
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      message.error('Failed to delete order');
     }
   };
 
@@ -187,6 +199,12 @@ export default function OrdersPage() {
                       >
                         [EDIT]
                       </button>
+                      <button
+                        onClick={() => setDeleteConfirm(order.id)}
+                        className="px-2 py-1 border border-black text-xs text-red-600 hover:bg-red-50"
+                      >
+                        [DEL]
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -229,7 +247,7 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={() => {
                       setSelectedOrder(order);
@@ -244,6 +262,12 @@ export default function OrdersPage() {
                     className="px-4 py-2 border-2 border-black bg-black text-white text-xs font-bold hover:bg-gray-800"
                   >
                     [EDIT]
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirm(order.id)}
+                    className="px-4 py-2 border-2 border-black text-xs font-bold text-red-600 hover:bg-red-50 flex items-center justify-center whitespace-nowrap"
+                  >
+                    [DEL]
                   </button>
                 </div>
               </div>
@@ -347,6 +371,34 @@ export default function OrdersPage() {
                       [VOID ORDER]
                     </button>
                   )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {deleteConfirm && (
+          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+            <div className="bg-white border-2 border-black max-w-md w-full font-mono">
+              <div className="border-b-2 border-black p-4">
+                <h2 className="text-lg font-bold text-center text-red-600">[DELETE ORDER?]</h2>
+              </div>
+              <div className="p-4">
+                <p className="text-sm text-center mb-6">Are you sure you want to delete this order? This action will mark it as deleted.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setDeleteConfirm(null)}
+                    className="px-6 py-3 border-2 border-black bg-white text-black font-bold text-sm hover:bg-gray-100"
+                  >
+                    [NO, CANCEL]
+                  </button>
+                  <button
+                    onClick={() => handleDeleteOrder(deleteConfirm)}
+                    className="px-6 py-3 border-2 border-black bg-red-600 text-white font-bold text-sm hover:bg-red-700"
+                  >
+                    [YES, DELETE]
+                  </button>
                 </div>
               </div>
             </div>

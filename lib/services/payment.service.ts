@@ -8,6 +8,7 @@ import {
   limit,
   serverTimestamp,
   runTransaction,
+  updateDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type {
@@ -254,4 +255,20 @@ export const paymentService = {
       throw new Error('Failed to fetch payments');
     }
   },
+
+  async softDelete(paymentId: string, staffId: string): Promise<void> {
+    try {
+      const paymentRef = doc(db, 'payments', paymentId);
+      await updateDoc(paymentRef, {
+        isDeleted: true,
+        deletedAt: serverTimestamp(),
+        deletedBy: staffId,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error soft deleting payment:', error);
+      throw error;
+    }
+  },
 };
+

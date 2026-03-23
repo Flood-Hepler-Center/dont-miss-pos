@@ -5,16 +5,21 @@ import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { Order, OrderType } from '@/types';
 import { format } from 'date-fns';
+import { DatePicker } from 'antd';
+import type { Dayjs } from 'dayjs';
 import { OrderTypeBadge } from '@/components/orders/OrderTypeBadge';
+import { orderService } from '@/lib/services/order.service';
 
 export default function OrdersManagementPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [dateFilter, setDateFilter] = useState('satsun');
+  const [customDateRange, setCustomDateRange] = useState<[Dayjs | null, Dayjs | null]>([null, null]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [orderTypeFilter, setOrderTypeFilter] = useState<OrderType | 'all'>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
@@ -28,6 +33,17 @@ export default function OrdersManagementPage() {
 
     return () => unsubscribe();
   }, []);
+
+  const handleDeleteOrder = async (orderId: string) => {
+    try {
+      await orderService.softDelete(orderId, 'admin');
+      setModalVisible(false);
+      setDeleteConfirm(null);
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      alert('Failed to delete order.');
+    }
+  };
 
   useEffect(() => {
     let filtered = [...orders];
@@ -71,6 +87,17 @@ export default function OrdersManagementPage() {
           : new Date((order.createdAt as { seconds: number }).seconds * 1000);
         return orderDate >= monthAgo;
       });
+    } else if (dateFilter === 'custom') {
+      if (customDateRange[0] && customDateRange[1]) {
+        const start = customDateRange[0].startOf('day').toDate();
+        const end = customDateRange[1].endOf('day').toDate();
+        filtered = filtered.filter((order) => {
+          const orderDate = order.createdAt instanceof Date 
+            ? order.createdAt 
+            : new Date((order.createdAt as { seconds: number }).seconds * 1000);
+          return orderDate >= start && orderDate <= end;
+        });
+      }
     }
 
     // Status filter
@@ -84,7 +111,7 @@ export default function OrdersManagementPage() {
     }
 
     setFilteredOrders(filtered);
-  }, [orders, dateFilter, statusFilter, orderTypeFilter]);
+  }, [orders, dateFilter, statusFilter, orderTypeFilter, customDateRange]);
 
   // Calculate stats
   const totalRevenue = filteredOrders.reduce((sum, o) => sum + (o.total || 0), 0);
@@ -185,14 +212,22 @@ export default function OrdersManagementPage() {
             <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
-              className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
+              className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none mb-2"
             >
               <option value="satsun">SAT+SUN</option>
               <option value="today">TODAY</option>
               <option value="week">LAST 7 DAYS</option>
               <option value="month">LAST 30 DAYS</option>
+              <option value="custom">CUSTOM RANGE</option>
               <option value="all">ALL TIME</option>
             </select>
+            {dateFilter === 'custom' && (
+              <DatePicker.RangePicker 
+                className="w-full border-2 border-black rounded-none shadow-none font-mono text-sm py-1.5"
+                value={customDateRange}
+                onChange={(dates) => setCustomDateRange(dates as [Dayjs | null, Dayjs | null] || [null, null])}
+              />
+            )}
           </div>
           <div>
             <label className="block text-xs font-bold mb-2">STATUS</label>
@@ -262,6 +297,12 @@ export default function OrdersManagementPage() {
                     >
                       [VIEW]
                     </button>
+                    <button
+                      onClick={() => setDeleteConfirm(order.id)}
+                      className="px-3 py-1 border border-black text-xs ml-2 text-red-600 hover:bg-red-50"
+                    >
+                      [DEL]
+                    </button>
                   </div>
                 </div>
               </div>
@@ -295,15 +336,23 @@ export default function OrdersManagementPage() {
                 <p className="font-bold">฿{(order.total || 0).toFixed(2)}</p>
                 <p className="text-xs">{order.items?.length || 0} items</p>
               </div>
-              <button
-                onClick={() => {
-                  setSelectedOrder(order);
-                  setModalVisible(true);
-                }}
-                className="w-full px-4 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
-              >
-                [VIEW DETAILS]
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setSelectedOrder(order);
+                    setModalVisible(true);
+                  }}
+                  className="flex-1 px-4 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
+                >
+                  [VIEW DETAILS]
+                </button>
+                <button
+                  onClick={() => setDeleteConfirm(order.id)}
+                  className="px-4 py-2 border-2 border-black text-xs font-bold text-red-600 hover:bg-red-50"
+                >
+                  [DEL]
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -415,6 +464,34 @@ export default function OrdersManagementPage() {
                 >
                   [CLOSE]
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {deleteConfirm && (
+          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+            <div className="bg-white border-2 border-black max-w-md w-full font-mono">
+              <div className="border-b-2 border-black p-4">
+                <h2 className="text-lg font-bold text-center text-red-600">[DELETE ORDER?]</h2>
+              </div>
+              <div className="p-4">
+                <p className="text-sm text-center mb-6">Are you sure you want to delete this order? This action will mark it as deleted.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setDeleteConfirm(null)}
+                    className="px-6 py-3 border-2 border-black bg-white text-black font-bold text-sm hover:bg-gray-100"
+                  >
+                    [NO, CANCEL]
+                  </button>
+                  <button
+                    onClick={() => handleDeleteOrder(deleteConfirm)}
+                    className="px-6 py-3 border-2 border-black bg-red-600 text-white font-bold text-sm hover:bg-red-700"
+                  >
+                    [YES, DELETE]
+                  </button>
+                </div>
               </div>
             </div>
           </div>

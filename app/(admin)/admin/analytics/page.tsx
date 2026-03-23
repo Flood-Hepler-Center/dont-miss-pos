@@ -13,6 +13,8 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
+import { DatePicker } from 'antd';
+import type { Dayjs } from 'dayjs';
 
 // ─── Local Payment type (extends Firestore data) ──────────────────────────────
 interface PaymentDoc {
@@ -103,6 +105,7 @@ export default function AnalyticsPage() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [dateRange, setDateRange] = useState('satsun');
+  const [customDateRange, setCustomDateRange] = useState<[Dayjs | null, Dayjs | null]>([null, null]);
   const [loading, setLoading] = useState(true);
   const [menuTab, setMenuTab] = useState<'revenue' | 'quantity'>('revenue');
 
@@ -164,7 +167,13 @@ export default function AnalyticsPage() {
   }, [categories]);
 
   // ── Date range ──────────────────────────────────────────────────────────────
-  const { startDate, prevStart, prevEnd } = useMemo(() => {
+  const { startDate, endDate, prevStart, prevEnd } = useMemo(() => {
+    if (dateRange === 'custom' && customDateRange[0] && customDateRange[1]) {
+      const s = customDateRange[0].startOf('day').toDate();
+      const e = customDateRange[1].endOf('day').toDate();
+      const span = e.getTime() - s.getTime() + 86400000; // 1 day in ms
+      return { startDate: s, endDate: e, prevStart: new Date(s.getTime() - span), prevEnd: s };
+    }
     const now = new Date();
     const map: Record<string, Date> = {
       satsun: startOfDay(subDays(now, (now.getDay() + 1) % 7)),
@@ -173,12 +182,19 @@ export default function AnalyticsPage() {
     };
     const s = map[dateRange] ?? new Date(0);
     const span = now.getTime() - s.getTime();
-    return { startDate: s, prevStart: new Date(s.getTime() - span), prevEnd: s };
-  }, [dateRange]);
+    return { startDate: s, endDate: now, prevStart: new Date(s.getTime() - span), prevEnd: s };
+  }, [dateRange, customDateRange]);
 
   // ── Filtered ────────────────────────────────────────────────────────────────
-  const filteredOrders   = useMemo(() => orders.filter(o => toDate(o.createdAt) >= startDate), [orders, startDate]);
-  const filteredPayments = useMemo(() => payments.filter(p => p.createdAt >= startDate), [payments, startDate]);
+  const filteredOrders   = useMemo(() => orders.filter(o => {
+    const d = toDate(o.createdAt);
+    return d >= startDate && d <= endDate;
+  }), [orders, startDate, endDate]);
+  
+  const filteredPayments = useMemo(() => payments.filter(p => {
+    return p.createdAt >= startDate && p.createdAt <= endDate;
+  }), [payments, startDate, endDate]);
+  
   const prevPayments     = useMemo(() => payments.filter(p => p.createdAt >= prevStart && p.createdAt < prevEnd), [payments, prevStart, prevEnd]);
 
   const validPayments    = useMemo(() => filteredPayments.filter(p => p.status === 'COMPLETED'), [filteredPayments]);
@@ -416,8 +432,8 @@ export default function AnalyticsPage() {
         </div>
 
         {/* ══ TIME PERIOD ══════════════════════════════════════════════════ */}
-        <div className="flex items-center gap-3 mb-6">
-          <label className="text-xs font-bold">PERIOD:</label>
+        <div className="flex items-center gap-3 mb-6 flex-wrap">
+          <label className="text-xs font-bold whitespace-nowrap">PERIOD:</label>
           <select
             value={dateRange}
             onChange={e => setDateRange(e.target.value)}
@@ -429,8 +445,16 @@ export default function AnalyticsPage() {
             <option value="30days">LAST 30 DAYS</option>
             <option value="week">THIS WEEK</option>
             <option value="month">THIS MONTH</option>
+            <option value="custom">CUSTOM RANGE</option>
             <option value="all">ALL TIME</option>
           </select>
+          {dateRange === 'custom' && (
+            <DatePicker.RangePicker 
+              className="border-2 border-black rounded-none shadow-none font-mono text-sm py-1.5 min-w-[280px]"
+              value={customDateRange}
+              onChange={(dates) => setCustomDateRange(dates as [Dayjs | null, Dayjs | null] || [null, null])}
+            />
+          )}
           <span className="text-xs text-gray-500">{filteredOrders.length} orders in scope</span>
         </div>
 
