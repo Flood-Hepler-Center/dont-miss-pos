@@ -266,7 +266,19 @@ export const paymentService = {
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
-      console.error('Error soft deleting payment:', error);
+      throw error;
+    }
+  },
+
+  async updateDate(paymentId: string, newDate: Date): Promise<void> {
+    try {
+      const paymentRef = doc(db, 'payments', paymentId);
+      await updateDoc(paymentRef, {
+        createdAt: newDate,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error updating payment date:', error);
       throw error;
     }
   },

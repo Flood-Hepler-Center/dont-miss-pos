@@ -9,7 +9,7 @@ import { format } from 'date-fns';
 import { toPng } from 'html-to-image';
 import { db } from '@/lib/firebase/config';
 import { orderService } from '@/lib/services/order.service';
-import type { Payment, Order, OrderItem } from '@/types';
+import type { Payment, Order, OrderItem, SelectedModifier } from '@/types';
 
 type ReceiptState = {
   payment: Payment | null;
@@ -182,8 +182,35 @@ export default function PublicReceiptPage() {
   const merchantInfo = state.merchantInfo;
   const processedDate = toDate(payment.processedAt);
 
-  // AC-3: Flatten items from all orders
-  const allItems = orders.flatMap((order) => order.items || []);
+  // AC-3: Flatten and group items from all orders
+  const groupedItems = orders.flatMap((order) => order.items || []).reduce((acc, item) => {
+    const modifierKey = (item.modifiers || [])
+      .map(m => m.optionId)
+      .sort()
+      .join(',');
+    const key = `${item.menuItemId}-${modifierKey}`;
+    
+    // Calculate display subtotal (Base + Modifiers) * Quantity
+    const modifierAdjustment = (item.modifiers || []).reduce(
+      (sum: number, mod: SelectedModifier) => sum + (mod.priceAdjustment || 0),
+      0
+    );
+    const itemFullPrice = item.price + modifierAdjustment;
+    const calculatedSubtotal = itemFullPrice * item.quantity;
+
+    if (acc[key]) {
+      acc[key].quantity += item.quantity;
+      acc[key].subtotal += (item.subtotal || calculatedSubtotal);
+    } else {
+      acc[key] = { 
+        ...item, 
+        subtotal: item.subtotal || calculatedSubtotal 
+      };
+    }
+    return acc;
+  }, {} as Record<string, OrderItem>);
+
+  const allItems = Object.values(groupedItems);
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 font-mono">

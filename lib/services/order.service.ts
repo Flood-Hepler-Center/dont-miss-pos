@@ -75,7 +75,8 @@ export const orderService = {
           (sum, mod) => sum + mod.priceAdjustment * item.quantity,
           0
         ) || 0;
-        subtotal += itemTotal + modifierTotal;
+        item.subtotal = itemTotal + modifierTotal; // Store individual item subtotal
+        subtotal += item.subtotal;
       });
 
       const tax = 0;
@@ -122,10 +123,10 @@ export const orderService = {
       const orderId = await runTransaction(db, async (transaction) => {
         // --- 1. ALL READS ---
         const seqSnap = await transaction.get(seqRef);
-        
+
         // Prepare arrays to hold item references and data for stock deduction
         const itemRefsData: { ref: ReturnType<typeof doc>; newStock: number }[] = [];
-        
+
         // Read all menu items to check stock
         for (const item of input.items) {
           if (item.menuItemId) {
@@ -154,12 +155,12 @@ export const orderService = {
         } else {
           transaction.set(seqRef, { date: dateStr, lastSequence: newSequence, updatedAt: serverTimestamp() });
         }
-        
+
         // Update stock
         for (const update of itemRefsData) {
-          transaction.update(update.ref, { 
-            stock: update.newStock, 
-            updatedAt: serverTimestamp() 
+          transaction.update(update.ref, {
+            stock: update.newStock,
+            updatedAt: serverTimestamp()
           });
         }
 
@@ -257,8 +258,8 @@ export const orderService = {
       };
 
       if (newStatus === 'PREPARING') updateData.preparingAt = serverTimestamp();
-      if (newStatus === 'READY')     updateData.readyAt = serverTimestamp();
-      if (newStatus === 'SERVED')    updateData.servedAt = serverTimestamp();
+      if (newStatus === 'READY') updateData.readyAt = serverTimestamp();
+      if (newStatus === 'SERVED') updateData.servedAt = serverTimestamp();
       if (newStatus === 'COMPLETED') updateData.completedAt = serverTimestamp();
 
       await updateDoc(orderRef, updateData);
@@ -640,6 +641,20 @@ export const orderService = {
       });
     } catch (error) {
       console.error('Error soft deleting order:', error);
+      throw error;
+    }
+  },
+
+  async updateDate(orderId: string, newDate: Date): Promise<void> {
+    try {
+      const orderRef = doc(db, 'orders', orderId);
+      await updateDoc(orderRef, {
+        createdAt: newDate,
+        placedAt: newDate, // Keep in sync
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error updating order date:', error);
       throw error;
     }
   },

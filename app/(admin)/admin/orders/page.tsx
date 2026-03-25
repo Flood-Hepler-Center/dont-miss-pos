@@ -20,6 +20,9 @@ export default function OrdersManagementPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [isEditingDate, setIsEditingDate] = useState(false);
+  const [editDate, setEditDate] = useState<string>('');
+  const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
     const ordersQuery = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
@@ -42,6 +45,27 @@ export default function OrdersManagementPage() {
     } catch (error) {
       console.error('Error deleting order:', error);
       alert('Failed to delete order.');
+    }
+  };
+
+  const handleUpdateDate = async () => {
+    if (!selectedOrder || !editDate) return;
+    setIsUpdating(true);
+    try {
+      const newDate = new Date(editDate);
+      await orderService.updateDate(selectedOrder.id, newDate);
+      
+      // Update local state
+      setSelectedOrder({
+        ...selectedOrder,
+        createdAt: newDate
+      });
+      setIsEditingDate(false);
+    } catch (error) {
+      console.error('Error updating date:', error);
+      alert('Failed to update date.');
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -393,7 +417,45 @@ export default function OrdersManagementPage() {
                   </div>
                   <div>
                     <p className="text-xs font-bold mb-1">DATE/TIME</p>
-                    <p>{format(selectedOrder.createdAt instanceof Date ? selectedOrder.createdAt : new Date((selectedOrder.createdAt as { seconds: number }).seconds * 1000), 'dd MMM yyyy HH:mm')}</p>
+                    {isEditingDate ? (
+                      <div className="flex flex-col gap-2">
+                        <input
+                          type="datetime-local"
+                          value={editDate}
+                          onChange={(e) => setEditDate(e.target.value)}
+                          className="border-2 border-black p-1 text-xs font-mono w-full"
+                        />
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={handleUpdateDate}
+                            disabled={isUpdating}
+                            className="text-[10px] font-bold underline px-2 py-1 border border-black hover:bg-black hover:text-white"
+                          >
+                            {isUpdating ? 'SAVING...' : '[SAVE]'}
+                          </button>
+                          <button 
+                            onClick={() => setIsEditingDate(false)}
+                            className="text-[10px] font-bold underline px-2 py-1 border border-black hover:bg-gray-100"
+                          >
+                            [CANCEL]
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="group flex flex-col items-start gap-1">
+                        <p>{format(selectedOrder.createdAt instanceof Date ? selectedOrder.createdAt : new Date((selectedOrder.createdAt as { seconds: number }).seconds * 1000), 'dd MMM yyyy HH:mm')}</p>
+                        <button 
+                          onClick={() => {
+                            const date = selectedOrder.createdAt instanceof Date ? selectedOrder.createdAt : new Date((selectedOrder.createdAt as { seconds: number }).seconds * 1000);
+                            setEditDate(format(date, "yyyy-MM-dd'T'HH:mm"));
+                            setIsEditingDate(true);
+                          }}
+                          className="text-[10px] font-bold underline hover:text-blue-600 transition-colors"
+                        >
+                          [EDIT DATE/TIME]
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs font-bold mb-1">STATUS</p>

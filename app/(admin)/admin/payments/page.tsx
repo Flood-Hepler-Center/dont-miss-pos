@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, getDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { format } from 'date-fns';
-import type { Payment, Order, SelectedModifier } from '@/types';
+import type { Payment, Order, OrderItem, SelectedModifier } from '@/types';
 import { paymentService } from '@/lib/services/payment.service';
 
 export default function AdminPaymentsPage() {
@@ -14,6 +14,9 @@ export default function AdminPaymentsPage() {
   const [modalVisible, setModalVisible] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [isEditingDate, setIsEditingDate] = useState(false);
+  const [editDate, setEditDate] = useState<string>('');
+  const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
     const q = query(collection(db, 'payments'), orderBy('createdAt', 'desc'));
@@ -61,6 +64,55 @@ export default function AdminPaymentsPage() {
       setLoadingOrders(false);
     }
   };
+
+  const handleUpdateDate = async () => {
+    if (!selectedPayment || !editDate) return;
+    setIsUpdating(true);
+    try {
+      const newDate = new Date(editDate);
+      await paymentService.updateDate(selectedPayment.id, newDate);
+      
+      // Update local state
+      setSelectedPayment({
+        ...selectedPayment,
+        createdAt: newDate
+      });
+      setIsEditingDate(false);
+    } catch (error) {
+      console.error('Error updating date:', error);
+      alert('Failed to update date.');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Group items helper
+  const groupedItems = linkedOrders.flatMap(o => o.items).reduce((acc, item) => {
+    const modifierKey = (item.modifiers || [])
+      .map(m => m.optionId)
+      .sort()
+      .join(',');
+    const key = `${item.menuItemId}-${modifierKey}`;
+    
+    // Calculate display subtotal (Base + Modifiers) * Quantity
+    const modifierAdjustment = (item.modifiers || []).reduce(
+      (sum: number, mod: SelectedModifier) => sum + (mod.priceAdjustment || 0),
+      0
+    );
+    const itemFullPrice = item.price + modifierAdjustment;
+    const calculatedSubtotal = itemFullPrice * item.quantity;
+
+    if (acc[key]) {
+      acc[key].quantity += item.quantity;
+      acc[key].subtotal += (item.subtotal || calculatedSubtotal);
+    } else {
+      acc[key] = { 
+        ...item, 
+        subtotal: item.subtotal || calculatedSubtotal 
+      };
+    }
+    return acc;
+  }, {} as Record<string, OrderItem>);
 
   return (
     <div className="min-h-screen bg-white font-mono p-4 md:p-6 pb-24">
@@ -177,8 +229,47 @@ export default function AdminPaymentsPage() {
                 <div className="text-center border-b-2 border-black border-dashed pb-4 mb-4">
                   <h2 className="text-xl font-bold tracking-widest">RECEIPT</h2>
                   <p className="text-xs font-bold mt-1">#{selectedPayment.receiptNumber}</p>
-                  <p className="text-xs mt-1 uppercase">{format(selectedPayment.createdAt, 'EEEE, dd MMMM yyyy')}</p>
-                  <p className="text-xs uppercase">{format(selectedPayment.createdAt, 'hh:mm:ss a')}</p>
+                  <div className="mt-2 flex flex-col items-center">
+                    {isEditingDate ? (
+                      <div className="flex flex-col gap-2 items-center">
+                        <input
+                          type="datetime-local"
+                          value={editDate}
+                          onChange={(e) => setEditDate(e.target.value)}
+                          className="border-2 border-black p-1 text-xs font-mono w-full max-w-[200px]"
+                        />
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={handleUpdateDate}
+                            disabled={isUpdating}
+                            className="text-[10px] font-bold underline px-2 py-1 border border-black hover:bg-black hover:text-white transition-colors"
+                          >
+                            {isUpdating ? 'SAVING...' : '[SAVE]'}
+                          </button>
+                          <button 
+                            onClick={() => setIsEditingDate(false)}
+                            className="text-[10px] font-bold underline px-2 py-1 border border-black hover:bg-gray-100 transition-colors"
+                          >
+                            [CANCEL]
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center">
+                        <p className="text-xs mt-1 uppercase font-bold">{format(selectedPayment.createdAt, 'EEEE, dd MMMM yyyy')}</p>
+                        <p className="text-xs uppercase">{format(selectedPayment.createdAt, 'hh:mm:ss a')}</p>
+                        <button 
+                          onClick={() => {
+                            setEditDate(format(selectedPayment.createdAt, "yyyy-MM-dd'T'HH:mm"));
+                            setIsEditingDate(true);
+                          }}
+                          className="text-[10px] font-bold underline mt-2 hover:text-blue-600 transition-colors"
+                        >
+                          [EDIT DATE/TIME]
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Receipt Details */}
@@ -206,7 +297,7 @@ export default function AdminPaymentsPage() {
                     <div className="py-8 text-center animate-pulse italic text-xs">Loading items...</div>
                   ) : (
                     <div className="space-y-3">
-                      {linkedOrders.flatMap(o => o.items).map((item, idx) => (
+                      {Object.values(groupedItems).map((item, idx) => (
                         <div key={idx} className="flex justify-between text-sm">
                           <div className="flex-1 pr-4">
                             <p className="font-bold flex items-start gap-1">
@@ -218,7 +309,7 @@ export default function AdminPaymentsPage() {
                             ))}
                           </div>
                           <div className="text-right font-bold whitespace-nowrap">
-                            ฿{(item.quantity * item.price).toFixed(2)}
+                            ฿{(item.subtotal).toFixed(2)}
                           </div>
                         </div>
                       ))}
