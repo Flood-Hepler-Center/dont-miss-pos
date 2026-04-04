@@ -144,17 +144,81 @@ export function CashPayment({ total, table, orders, billCalculation, onComplete,
 
       <div className="border-2 border-black">
         <div className="border-b-2 border-black p-4 text-center">
-          <div className="text-sm"></div>
+          <div className="text-sm">══════════</div>
           <h2 className="text-xl font-bold my-1">CASH PAYMENT</h2>
-          <div className="text-sm"></div>
+          <div className="text-sm">══════════</div>
         </div>
 
         <div className="p-6 space-y-6">
+          {/* Order Items Summary */}
+          <div className="border-2 border-black">
+            <div className="border-b-2 border-black p-3 text-center">
+              <p className="text-xs font-bold">[ ORDER SUMMARY ]</p>
+            </div>
+            <div className="p-4 space-y-1">
+              {orders.flatMap((o) => o.items || []).filter((item) => !item.isVoided).map((item, idx) => (
+                <div key={idx} className="text-sm">
+                  <div className="flex justify-between">
+                    <div className="flex-1 pr-2">
+                      <span>{item.quantity}× {item.name}</span>
+                      {item.modifiers && item.modifiers.length > 0 && (
+                        <div className="text-xs text-gray-500 ml-4">
+                          {item.modifiers.map((mod, mIdx) => (
+                            <span key={mIdx} className="block">+ {mod.optionName}</span>
+                          ))}
+                        </div>
+                      )}
+                      {item.isComped && (
+                        <span className="text-xs text-green-700 ml-2">[COMP]</span>
+                      )}
+                    </div>
+                    <span className="font-bold whitespace-nowrap">
+                      {item.isComped ? '฿0.00' : `฿${(item.subtotal || 0).toFixed(2)}`}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {orders.flatMap((o) => o.items || []).filter((item) => item.isVoided).length > 0 && (
+                <div className="pt-2 mt-2 border-t border-dashed border-gray-300">
+                  {orders.flatMap((o) => o.items || []).filter((item) => item.isVoided).map((item, idx) => (
+                    <div key={`voided-${idx}`} className="text-sm opacity-40 line-through">
+                      <div className="flex justify-between">
+                        <span>{item.quantity}× {item.name}</span>
+                        <span>฿{(item.subtotal || 0).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Bill Breakdown */}
+            <div className="border-t-2 border-dashed border-black p-4 space-y-1">
+              <div className="flex justify-between text-sm">
+                <span>SUBTOTAL:</span>
+                <span>฿{billCalculation.subtotal.toFixed(2)}</span>
+              </div>
+              {billCalculation.discountAmount > 0 && (
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>
+                    DISCOUNT ({billCalculation.discountType === 'PERCENTAGE'
+                      ? `${billCalculation.discountPercent}%`
+                      : 'FIXED'}):
+                  </span>
+                  <span>-฿{billCalculation.discountAmount.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-lg font-bold border-t-2 border-black pt-2 mt-1">
+                <span>TOTAL:</span>
+                <span>฿{billCalculation.total.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+
           {/* Amount Due */}
           <div className="border-2 border-black p-6">
             <div className="text-center">
               <p className="text-xs mb-2">AMOUNT DUE</p>
-              <p className="text-4xl font-bold">฿{total.toFixed(2)}</p>
+              <p className="text-5xl font-bold">฿{total.toFixed(2)}</p>
             </div>
           </div>
 
@@ -210,3 +274,4 @@ export function CashPayment({ total, table, orders, billCalculation, onComplete,
     </div>
   );
 }
+

@@ -67,6 +67,53 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {/* Navigation Menu */}
         <div className="border-t-2 border-black">
           <div className="flex overflow-x-auto">
+
+            {/* ── STAFF OPERATIONS (shown first) ── */}
+            <div className="flex items-center px-2 text-[10px] font-bold text-gray-400 flex-shrink-0 border-r-2 border-black bg-gray-50 select-none">
+              OPS
+            </div>
+
+            <button
+              onClick={() => router.push('/admin/cashier')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/cashier' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              CASHIER
+            </button>
+
+            <button
+              onClick={() => router.push('/admin/table-status')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/table-status' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              TABLE STATUS
+            </button>
+
+            <button
+              onClick={() => router.push('/admin/live-orders')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/live-orders' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              LIVE ORDERS
+            </button>
+
+            <button
+              onClick={() => router.push('/admin/kds')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/kds' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              KITCHEN
+            </button>
+
+            {/* ── ADMIN MANAGEMENT ── */}
+            <div className="flex items-center px-2 text-[10px] font-bold text-gray-400 flex-shrink-0 border-r-2 border-black bg-gray-50 select-none">
+              ADMIN
+            </div>
+
             <button
               onClick={() => router.push('/admin/dashboard')}
               className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
@@ -75,7 +122,43 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             >
               DASHBOARD
             </button>
-            
+
+            <button
+              onClick={() => router.push('/admin/orders')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/orders' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              ALL ORDERS
+            </button>
+
+            <button
+              onClick={() => router.push('/admin/payments')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/payments' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              PAYMENTS
+            </button>
+
+            <button
+              onClick={() => router.push('/admin/analytics')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/analytics' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              ANALYTICS
+            </button>
+
+            <button
+              onClick={() => router.push('/admin/reports')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/reports' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              REPORTS
+            </button>
+
             <button
               onClick={() => router.push('/admin/menu/categories')}
               className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
@@ -91,61 +174,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 pathname === '/admin/menu/items' ? 'bg-black text-white' : 'bg-white text-black'
               }`}
             >
-              ITEMS
+              MENU ITEMS
             </button>
 
             <button
               onClick={() => router.push('/admin/inventory')}
               className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
-                pathname === '/admin/inventory' ? 'bg-black text-white' : 'bg-white text-black'
+                pathname.startsWith('/admin/inventory') && pathname !== '/admin/inventory/history'
+                  ? 'bg-black text-white'
+                  : 'bg-white text-black'
               }`}
             >
               INVENTORY
-            </button>
-            
-            <button
-              onClick={() => router.push('/admin/recipes')}
-              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
-                pathname === '/admin/recipes' ? 'bg-black text-white' : 'bg-white text-black'
-              }`}
-            >
-              RECIPES
-            </button>
-
-            <button
-              onClick={() => router.push('/admin/orders')}
-              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
-                pathname === '/admin/orders' ? 'bg-black text-white' : 'bg-white text-black'
-              }`}
-            >
-              ORDERS
-            </button>
-
-            <button
-              onClick={() => router.push('/admin/analytics')}
-              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
-                pathname === '/admin/analytics' ? 'bg-black text-white' : 'bg-white text-black'
-              }`}
-            >
-              ANALYTICS
-            </button>
-            
-            <button
-              onClick={() => router.push('/admin/reports')}
-              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
-                pathname === '/admin/reports' ? 'bg-black text-white' : 'bg-white text-black'
-              }`}
-            >
-              REPORTS
-            </button>
-
-            <button
-              onClick={() => router.push('/admin/payments')}
-              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
-                pathname === '/admin/payments' ? 'bg-black text-white' : 'bg-white text-black'
-              }`}
-            >
-              PAYMENTS
             </button>
 
             <button
@@ -155,6 +195,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               }`}
             >
               STOCK HISTORY
+            </button>
+
+            <button
+              onClick={() => router.push('/admin/recipes')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/recipes' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              RECIPES
             </button>
 
             <button
@@ -172,7 +221,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 pathname === '/admin/settings/tables' ? 'bg-black text-white' : 'bg-white text-black'
               }`}
             >
-              TABLES
+              TABLE SETUP
             </button>
           </div>
         </div>

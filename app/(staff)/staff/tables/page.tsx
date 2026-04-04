@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { orderService } from '@/lib/services/order.service';
@@ -11,7 +11,9 @@ export default function TablesPage() {
   const [tables, setTables] = useState<Table[]>([]);
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
   const [tableOrders, setTableOrders] = useState<Order[]>([]);
+  const unsubscribeOrdersRef = useRef<(() => void) | null>(null);
 
+  // Subscribe to all tables
   useEffect(() => {
     const q = query(collection(db, 'tables'), orderBy('tableId', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -25,17 +27,55 @@ export default function TablesPage() {
     return () => unsubscribe();
   }, []);
 
-  const handleTableClick = async (table: Table) => {
+  // Subscribe to active (unpaid) orders for the selected table in real-time
+  const handleTableClick = (table: Table) => {
     setSelectedTable(table);
-    if (table.activeOrders && table.activeOrders.length > 0) {
-      const orders = await Promise.all(
-        table.activeOrders.map((orderId) => orderService.getById(orderId))
-      );
-      setTableOrders(orders.filter((order): order is Order => order !== null));
-    } else {
+
+    // Unsubscribe from previous table's orders if any
+    if (unsubscribeOrdersRef.current) {
+      unsubscribeOrdersRef.current();
+      unsubscribeOrdersRef.current = null;
+    }
+
+    if (table.status !== 'OCCUPIED') {
       setTableOrders([]);
+      return;
+    }
+
+    // subscribeToTableOrders already filters to non-completed statuses:
+    // ['PLACED', 'PREPARING', 'READY', 'SERVED']
+    const unsub = orderService.subscribeToTableOrders(table.id, (orders) => {
+      setTableOrders(orders);
+    });
+
+    unsubscribeOrdersRef.current = unsub;
+  };
+
+  const handleCloseModal = () => {
+    setSelectedTable(null);
+    setTableOrders([]);
+    if (unsubscribeOrdersRef.current) {
+      unsubscribeOrdersRef.current();
+      unsubscribeOrdersRef.current = null;
     }
   };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (unsubscribeOrdersRef.current) {
+        unsubscribeOrdersRef.current();
+      }
+    };
+  }, []);
+
+  // Compute per-order totals (only non-voided, non-comped items)
+  const getOrderTotal = (order: Order) =>
+    (order.items || [])
+      .filter((i) => !i.isVoided && !i.isComped)
+      .reduce((sum, i) => sum + (i.subtotal || 0), 0);
+
+  const grandTotal = tableOrders.reduce((sum, o) => sum + getOrderTotal(o), 0);
 
   return (
     <div className="min-h-screen bg-white font-mono p-4">
@@ -44,7 +84,7 @@ export default function TablesPage() {
         <div className="text-center border-2 border-black p-4 mb-6">
           <div className="text-xl">═══════════</div>
           <h1 className="text-2xl font-bold my-2">TABLE MANAGEMENT</h1>
-          <p className="text-sm">Monitor Status & Active Orders</p>
+          <p className="text-sm">Monitor Status &amp; Active Orders</p>
           <div className="text-xl">═══════════</div>
         </div>
 
@@ -94,7 +134,7 @@ export default function TablesPage() {
         {/* Table Details Modal */}
         {selectedTable && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white border-2 border-black max-w-2xl w-full max-h-[80vh] overflow-y-auto font-mono">
+            <div className="bg-white border-2 border-black max-w-2xl w-full max-h-[85vh] overflow-y-auto font-mono">
               {/* Modal Header */}
               <div className="border-b-2 border-black p-4 sticky top-0 bg-white">
                 <div className="flex justify-between items-center">
@@ -105,7 +145,7 @@ export default function TablesPage() {
                     <div className="text-sm">═══════</div>
                   </div>
                   <button
-                    onClick={() => setSelectedTable(null)}
+                    onClick={handleCloseModal}
                     className="p-2 hover:bg-gray-100 transition-colors"
                   >
                     <X size={20} />
@@ -118,40 +158,89 @@ export default function TablesPage() {
                 {tableOrders.length > 0 ? (
                   <div>
                     <h3 className="text-sm font-bold mb-3 text-center border-b-2 border-black pb-2">
-                      [ ACTIVE ORDERS: {tableOrders.length} ]
+                      [ UNPAID ORDERS: {tableOrders.length} ]
                     </h3>
-                    <div className="space-y-3">
-                      {tableOrders.map((order) => (
-                        <div key={order.id} className="border-2 border-black p-3">
-                          <div className="flex justify-between items-center mb-2 text-sm">
-                            <span className="font-bold">ORDER #{order.orderNumber || order.id.slice(-6).toUpperCase()}</span>
-                            <span className="px-2 py-1 border-2 border-black text-xs">
-                              {order.status}
-                            </span>
-                          </div>
-                          <div className="text-xs space-y-1">
-                            <div className="flex justify-between">
-                              <span>ITEMS:</span>
-                              <span>{order.items?.length || 0}</span>
+                    <div className="space-y-4">
+                      {tableOrders.map((order) => {
+                        const orderTotal = getOrderTotal(order);
+                        return (
+                          <div key={order.id} className="border-2 border-black">
+                            {/* Order Header */}
+                            <div className="border-b-2 border-black p-3 flex justify-between items-center bg-gray-50">
+                              <span className="font-bold text-sm">
+                                ORDER #{order.orderNumber || order.id.slice(-6).toUpperCase()}
+                              </span>
+                              <span className="px-2 py-1 border-2 border-black text-xs font-bold">
+                                {order.status}
+                              </span>
                             </div>
-                            <div className="flex justify-between border-t-2 border-dashed border-black pt-1">
-                              <span className="font-bold">TOTAL:</span>
-                              <span className="font-bold">฿{order.total?.toFixed(2) || '0.00'}</span>
+
+                            {/* Order Items */}
+                            <div className="p-3 space-y-2">
+                              {(order.items || []).map((item, itemIdx) => (
+                                <div
+                                  key={itemIdx}
+                                  className={`text-sm ${item.isVoided ? 'opacity-40' : ''}`}
+                                >
+                                  <div className="flex justify-between">
+                                    <div className="flex-1 pr-2">
+                                      <span className={item.isVoided ? 'line-through' : ''}>
+                                        {item.quantity}× {item.name}
+                                      </span>
+                                      {item.isVoided && (
+                                        <span className="ml-2 text-xs text-red-600">[VOIDED]</span>
+                                      )}
+                                      {item.isComped && (
+                                        <span className="ml-2 text-xs text-green-700">[COMP]</span>
+                                      )}
+                                      {item.modifiers && item.modifiers.length > 0 && (
+                                        <div className="text-xs text-gray-500 ml-4 mt-0.5">
+                                          {item.modifiers.map((mod, mIdx) => (
+                                            <span key={mIdx} className="block">+ {mod.optionName}</span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <span className={`whitespace-nowrap ${item.isVoided ? 'line-through' : 'font-bold'}`}>
+                                      {item.isComped ? '฿0.00' : `฿${(item.subtotal || 0).toFixed(2)}`}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Order Total */}
+                            <div className="border-t-2 border-dashed border-black px-3 py-2 flex justify-between text-sm font-bold">
+                              <span>ORDER TOTAL:</span>
+                              <span>฿{orderTotal.toFixed(2)}</span>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
+                    </div>
+
+                    {/* Grand Total */}
+                    <div className="mt-4 border-2 border-black p-3 flex justify-between text-lg font-bold">
+                      <span>GRAND TOTAL:</span>
+                      <span>฿{grandTotal.toFixed(2)}</span>
                     </div>
                   </div>
                 ) : (
                   <div className="text-center py-12 border-2 border-dashed border-black">
-                    <p className="text-sm text-gray-600">NO ACTIVE ORDERS</p>
+                    <p className="text-sm text-gray-600">
+                      {selectedTable.status === 'OCCUPIED'
+                        ? 'LOADING ORDERS...'
+                        : 'NO ACTIVE ORDERS'}
+                    </p>
+                    {selectedTable.status === 'OCCUPIED' && (
+                      <p className="text-xs text-gray-400 mt-2">All orders may have been paid</p>
+                    )}
                   </div>
                 )}
 
                 {/* Close Button */}
                 <button
-                  onClick={() => setSelectedTable(null)}
+                  onClick={handleCloseModal}
                   className="w-full mt-4 px-6 py-3 border-2 border-black bg-black text-white font-bold text-sm hover:bg-gray-800 transition-colors"
                 >
                   [CLOSE]
