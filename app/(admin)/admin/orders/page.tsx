@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { Order, OrderType } from '@/types';
@@ -11,6 +12,7 @@ import { OrderTypeBadge } from '@/components/orders/OrderTypeBadge';
 import { orderService } from '@/lib/services/order.service';
 
 export default function OrdersManagementPage() {
+  const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [dateFilter, setDateFilter] = useState('satsun');
@@ -159,13 +161,23 @@ export default function OrdersManagementPage() {
     <div className="min-h-screen bg-white font-mono p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="border-2 border-black p-4 mb-6 text-center">
-          <div className="text-sm hidden md:block">════════════════════════════════════</div>
-          <div className="text-xl md:hidden">═══════════</div>
-          <h1 className="text-xl md:text-2xl font-bold my-2">ORDER MANAGEMENT</h1>
-          <p className="text-xs md:text-sm">Business Overview & Order Details</p>
-          <div className="text-sm hidden md:block">════════════════════════════════════</div>
-          <div className="text-xl md:hidden">═══════════</div>
+        <div className="border-2 border-black p-4 mb-6">
+          <div className="flex justify-between items-center">
+            <div className="flex-1 text-center">
+              <div className="text-sm hidden md:block">════════════════════════════════════</div>
+              <div className="text-xl md:hidden">═══════════</div>
+              <h1 className="text-xl md:text-2xl font-bold my-2">ORDER MANAGEMENT</h1>
+              <p className="text-xs md:text-sm">Business Overview & Order Details</p>
+              <div className="text-sm hidden md:block">════════════════════════════════════</div>
+              <div className="text-xl md:hidden">═══════════</div>
+            </div>
+            <button
+              onClick={() => router.push('/admin/orders/create')}
+              className="px-4 py-2 border-2 border-black bg-black text-white font-bold text-sm hover:bg-gray-800 flex-shrink-0"
+            >
+              [+ NEW ORDER]
+            </button>
+          </div>
         </div>
 
         {/* Stats Grid */}
@@ -322,8 +334,14 @@ export default function OrdersManagementPage() {
                       [VIEW]
                     </button>
                     <button
+                      onClick={() => router.push(`/admin/orders/${order.id}/edit`)}
+                      className="px-3 py-1 border border-black text-xs ml-1 hover:bg-gray-100"
+                    >
+                      [EDIT]
+                    </button>
+                    <button
                       onClick={() => setDeleteConfirm(order.id)}
-                      className="px-3 py-1 border border-black text-xs ml-2 text-red-600 hover:bg-red-50"
+                      className="px-3 py-1 border border-black text-xs ml-1 text-red-600 hover:bg-red-50"
                     >
                       [DEL]
                     </button>
@@ -368,7 +386,13 @@ export default function OrdersManagementPage() {
                   }}
                   className="flex-1 px-4 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
                 >
-                  [VIEW DETAILS]
+                  [VIEW]
+                </button>
+                <button
+                  onClick={() => router.push(`/admin/orders/${order.id}/edit`)}
+                  className="px-4 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
+                >
+                  [EDIT]
                 </button>
                 <button
                   onClick={() => setDeleteConfirm(order.id)}

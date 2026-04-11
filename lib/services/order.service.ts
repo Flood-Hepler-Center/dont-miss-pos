@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { recipeService } from './recipe.service';
+import { calculateItemSubtotal } from '@/lib/utils/price';
 import type { Order, OrderStatus, CreateOrderInput, OrderType } from '@/types';
 
 const VALID_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -70,12 +71,12 @@ export const orderService = {
 
       let subtotal = 0;
       input.items.forEach((item) => {
-        const itemTotal = item.price * item.quantity;
-        const modifierTotal = item.modifiers?.reduce(
-          (sum, mod) => sum + mod.priceAdjustment * item.quantity,
-          0
-        ) || 0;
-        item.subtotal = itemTotal + modifierTotal; // Store individual item subtotal
+        // Use calculateItemSubtotal to properly handle absolutePrice modifiers
+        item.subtotal = calculateItemSubtotal(
+          item.price,
+          item.quantity,
+          item.modifiers
+        );
         subtotal += item.subtotal;
       });
 
@@ -361,12 +362,11 @@ export const orderService = {
       let subtotal = 0;
       items.forEach((item) => {
         if (!item.isVoided) {
-          const itemTotal = item.price * item.quantity;
-          const modifierTotal = item.modifiers?.reduce(
-            (sum, mod) => sum + mod.priceAdjustment * item.quantity,
-            0
-          ) || 0;
-          subtotal += itemTotal + modifierTotal;
+          subtotal += calculateItemSubtotal(
+            item.price,
+            item.quantity,
+            item.modifiers
+          );
         }
       });
 
@@ -406,21 +406,25 @@ export const orderService = {
         throw new Error('Invalid item index');
       }
 
+      const item = items[itemIndex];
       items[itemIndex] = {
-        ...items[itemIndex],
+        ...item,
         quantity: newQuantity,
-        subtotal: items[itemIndex].price * newQuantity,
+        subtotal: calculateItemSubtotal(
+          item.price,
+          newQuantity,
+          item.modifiers
+        ),
       };
 
       let subtotal = 0;
-      items.forEach((item) => {
-        if (!item.isVoided) {
-          const itemTotal = item.price * item.quantity;
-          const modifierTotal = item.modifiers?.reduce(
-            (sum, mod) => sum + mod.priceAdjustment * item.quantity,
-            0
-          ) || 0;
-          subtotal += itemTotal + modifierTotal;
+      items.forEach((i) => {
+        if (!i.isVoided) {
+          subtotal += calculateItemSubtotal(
+            i.price,
+            i.quantity,
+            i.modifiers
+          );
         }
       });
 
@@ -461,12 +465,11 @@ export const orderService = {
       let subtotal = 0;
       items.forEach((item) => {
         if (!item.isVoided) {
-          const itemTotal = item.price * item.quantity;
-          const modifierTotal = item.modifiers?.reduce(
-            (sum, mod) => sum + mod.priceAdjustment * item.quantity,
-            0
-          ) || 0;
-          subtotal += itemTotal + modifierTotal;
+          subtotal += calculateItemSubtotal(
+            item.price,
+            item.quantity,
+            item.modifiers
+          );
         }
       });
 

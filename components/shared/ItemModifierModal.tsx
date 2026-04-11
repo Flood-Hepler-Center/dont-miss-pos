@@ -23,7 +23,24 @@ export function ItemModifierModal({ item, quantity: initialQuantity = 1, onClose
       initial[group.id] = [];
     });
     setSelections(initial);
+    setError(''); // Reset error when item changes
   }, [item]);
+
+  // Check if all required modifier groups have selections
+  const validateRequiredSelections = (): { isValid: boolean; missingGroups: string[] } => {
+    const missingGroups: string[] = [];
+    item.modifiers?.forEach((group) => {
+      if (group.required) {
+        const groupSelections = selections[group.id] || [];
+        if (groupSelections.length === 0) {
+          missingGroups.push(group.name);
+        }
+      }
+    });
+    return { isValid: missingGroups.length === 0, missingGroups };
+  };
+
+  const { isValid: allRequiredSelected, missingGroups } = validateRequiredSelections();
 
   const handleOptionToggle = (group: ModifierGroup, option: ModifierOption) => {
     const groupSelections = selections[group.id] || [];
@@ -89,16 +106,9 @@ export function ItemModifierModal({ item, quantity: initialQuantity = 1, onClose
   };
 
   const handleConfirm = () => {
-    // Validate required groups
-    const missingRequired: string[] = [];
-    item.modifiers?.forEach((group) => {
-      if (group.required && (!selections[group.id] || selections[group.id].length === 0)) {
-        missingRequired.push(group.name);
-      }
-    });
-
-    if (missingRequired.length > 0) {
-      setError(`Please select: ${missingRequired.join(', ')}`);
+    // Validate required groups (should not happen if button is disabled, but safety check)
+    if (!allRequiredSelected) {
+      setError(`Please select: ${missingGroups.join(', ')}`);
       return;
     }
 
@@ -154,11 +164,23 @@ export function ItemModifierModal({ item, quantity: initialQuantity = 1, onClose
               {item.modifiers.map((group) => (
                 <div key={group.id} className="border-2 border-black p-3">
                   <div className="mb-3">
-                    <h3 className="font-bold text-sm">
-                      {group.name.toUpperCase()}
-                      {group.required && <span className="text-red-600"> *</span>}
-                    </h3>
-                    <p className="text-xs text-gray-600">
+                    <div className="flex justify-between items-center">
+                      <h3 className="font-bold text-sm">
+                        {group.name.toUpperCase()}
+                      </h3>
+                      {group.required && (
+                        <span
+                          className={`text-xs px-2 py-1 ${
+                            (selections[group.id] || []).length > 0
+                              ? 'bg-green-600 text-white'
+                              : 'bg-red-600 text-white animate-pulse'
+                          }`}
+                        >
+                          {(selections[group.id] || []).length > 0 ? '✓ SELECTED' : 'REQUIRED'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-600 mt-1">
                       {group.maxSelections === 1
                         ? 'Select one'
                         : `Select up to ${group.maxSelections}`}
@@ -243,9 +265,14 @@ export function ItemModifierModal({ item, quantity: initialQuantity = 1, onClose
               </button>
               <button
                 onClick={handleConfirm}
-                className="px-6 py-3 border-2 border-black bg-black text-white hover:bg-gray-800 font-bold text-sm"
+                disabled={!allRequiredSelected}
+                className={`px-6 py-3 border-2 font-bold text-sm transition-all ${
+                  allRequiredSelected
+                    ? 'border-black bg-black text-white hover:bg-gray-800'
+                    : 'border-gray-300 bg-gray-200 text-gray-500 cursor-not-allowed'
+                }`}
               >
-                [CONFIRM]
+                {allRequiredSelected ? '[CONFIRM]' : '[SELECT REQUIRED]'}
               </button>
             </div>
           </div>

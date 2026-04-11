@@ -43,6 +43,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
     { path: '/staff/dashboard', label: 'DASHBOARD' },
     { path: '/staff/orders', label: 'ORDERS' },
     { path: '/staff/tables', label: 'TABLES' },
+    { path: '/staff/bookings', label: 'BOOKINGS' },
     { path: '/staff/cashier', label: 'CASHIER' },
     { path: '/staff/kds', label: 'KITCHEN' },
   ];

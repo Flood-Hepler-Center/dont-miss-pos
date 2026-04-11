@@ -22,7 +22,24 @@ export function ItemModifierModal({ item, onClose, onAddToCart }: ItemModifierMo
       initial[group.id] = [];
     });
     setSelections(initial);
+    setError(''); // Reset error when item changes
   }, [item]);
+
+  // Check if all required modifier groups have selections
+  const validateRequiredSelections = (): { isValid: boolean; missingGroups: string[] } => {
+    const missingGroups: string[] = [];
+    item.modifiers?.forEach((group) => {
+      if (group.required) {
+        const groupSelections = selections[group.id] || [];
+        if (groupSelections.length === 0) {
+          missingGroups.push(group.name);
+        }
+      }
+    });
+    return { isValid: missingGroups.length === 0, missingGroups };
+  };
+
+  const { isValid: allRequiredSelected, missingGroups } = validateRequiredSelections();
 
   const handleOptionToggle = (group: ModifierGroup, option: ModifierOption) => {
     const groupSelections = selections[group.id] || [];
@@ -88,16 +105,9 @@ export function ItemModifierModal({ item, onClose, onAddToCart }: ItemModifierMo
   };
 
   const handleAddToCart = () => {
-    // Validate required groups
-    const missingRequired: string[] = [];
-    item.modifiers?.forEach((group) => {
-      if (group.required && (!selections[group.id] || selections[group.id].length === 0)) {
-        missingRequired.push(group.name);
-      }
-    });
-
-    if (missingRequired.length > 0) {
-      setError(`Please select: ${missingRequired.join(', ')}`);
+    // Validate required groups (should not happen if button is disabled, but safety check)
+    if (!allRequiredSelected) {
+      setError(`Please select: ${missingGroups.join(', ')}`);
       return;
     }
 
@@ -159,7 +169,15 @@ export function ItemModifierModal({ item, onClose, onAddToCart }: ItemModifierMo
                     <div className="flex justify-between items-center">
                       <h3 className="text-sm font-bold">{group.name}</h3>
                       {group.required && (
-                        <span className="text-xs bg-black text-white px-2 py-1">REQUIRED</span>
+                        <span
+                          className={`text-xs px-2 py-1 ${
+                            (selections[group.id] || []).length > 0
+                              ? 'bg-green-600 text-white'
+                              : 'bg-red-600 text-white animate-pulse'
+                          }`}
+                        >
+                          {(selections[group.id] || []).length > 0 ? '✓ SELECTED' : 'REQUIRED'}
+                        </span>
                       )}
                     </div>
                     {group.maxSelections > 1 && (
@@ -240,9 +258,16 @@ export function ItemModifierModal({ item, onClose, onAddToCart }: ItemModifierMo
           {/* Add to Cart */}
           <button
             onClick={handleAddToCart}
-            className="w-full p-4 border-2 border-black bg-black text-white font-bold text-lg hover:bg-gray-800"
+            disabled={!allRequiredSelected}
+            className={`w-full p-4 border-2 font-bold text-lg transition-all ${
+              allRequiredSelected
+                ? 'border-black bg-black text-white hover:bg-gray-800'
+                : 'border-gray-300 bg-gray-200 text-gray-500 cursor-not-allowed'
+            }`}
           >
-            ADD TO CART - ฿{calculateTotal().toFixed(2)}
+            {allRequiredSelected
+              ? `ADD TO CART - ฿${calculateTotal().toFixed(2)}`
+              : `SELECT REQUIRED: ${missingGroups.join(', ')}`}
           </button>
         </div>
       </div>

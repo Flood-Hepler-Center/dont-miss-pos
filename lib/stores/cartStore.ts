@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { MenuItem, SelectedModifier } from '@/types';
+import { calculateItemSubtotal } from '@/lib/utils/price';
 
 export interface CartItem {
   id: string;
@@ -30,33 +31,6 @@ interface CartState {
   getItemCount: () => number;
 }
 
-function calculateItemTotal(
-  price: number,
-  quantity: number,
-  modifiers: SelectedModifier[] = []
-): number {
-  let basePrice = price;
-  let hasAbsolutePrice = false;
-  
-  // Check for absolute price modifiers (takes precedence)
-  for (const mod of modifiers) {
-    const modifier = mod as { priceMode?: string; absolutePrice?: number; priceAdjustment?: number };
-    if (modifier.priceMode === 'absolute' && modifier.absolutePrice) {
-      basePrice = modifier.absolutePrice;
-      hasAbsolutePrice = true;
-      break; // Only one absolute price should apply
-    }
-  }
-  
-  // Apply adjustments only if no absolute price
-  if (!hasAbsolutePrice) {
-    const adjustments = modifiers.reduce((sum, mod) => sum + mod.priceAdjustment, 0);
-    basePrice = price + adjustments;
-  }
-  
-  return Math.round(basePrice * quantity * 100) / 100;
-}
-
 export const useCartStore = create<CartState>()(
   persist(
     (set, get) => ({
@@ -82,7 +56,7 @@ export const useCartStore = create<CartState>()(
                 ? {
                     ...cartItem,
                     quantity: cartItem.quantity + quantity,
-                    subtotal: calculateItemTotal(
+                    subtotal: calculateItemSubtotal(
                       cartItem.price,
                       cartItem.quantity + quantity,
                       cartItem.modifiers
@@ -99,7 +73,7 @@ export const useCartStore = create<CartState>()(
             price: item.price,
             quantity,
             modifiers,
-            subtotal: calculateItemTotal(item.price, quantity, modifiers),
+            subtotal: calculateItemSubtotal(item.price, quantity, modifiers),
           };
           set((state) => ({ items: [...state.items, cartItem] }));
         }
@@ -119,7 +93,7 @@ export const useCartStore = create<CartState>()(
               ? {
                   ...item,
                   quantity,
-                  subtotal: calculateItemTotal(item.price, quantity, item.modifiers),
+                  subtotal: calculateItemSubtotal(item.price, quantity, item.modifiers),
                 }
               : item
           ),

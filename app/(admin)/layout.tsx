@@ -109,6 +109,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               KITCHEN
             </button>
 
+            <button
+              onClick={() => router.push('/admin/bookings')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname === '/admin/bookings' ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              BOOKINGS
+            </button>
+
             {/* ── ADMIN MANAGEMENT ── */}
             <div className="flex items-center px-2 text-[10px] font-bold text-gray-400 flex-shrink-0 border-r-2 border-black bg-gray-50 select-none">
               ADMIN
