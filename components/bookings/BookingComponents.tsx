@@ -429,3 +429,119 @@ export function BookingList({ bookings, onStatusChange, onEdit, onDelete }: Book
     </div>
   );
 }
+
+// ============================================
+// Booking Kanban Board
+// ============================================
+type BookingKanbanProps = {
+  bookings: Booking[];
+  onStatusChange: (id: string, status: BookingStatus) => void;
+  onEdit: (booking: Booking) => void;
+  onDelete: (id: string) => void;
+};
+
+const KANBAN_COLUMNS: { status: BookingStatus; label: string; color: string; bgColor: string }[] = [
+  { status: 'PENDING', label: 'PENDING', color: 'border-yellow-400', bgColor: 'bg-yellow-50' },
+  { status: 'CONFIRMED', label: 'CONFIRMED', color: 'border-blue-400', bgColor: 'bg-blue-50' },
+  { status: 'SEATED', label: 'SEATED', color: 'border-green-400', bgColor: 'bg-green-50' },
+  { status: 'CANCELLED', label: 'CANCELLED', color: 'border-red-400', bgColor: 'bg-red-50' },
+  { status: 'NO_SHOW', label: 'NO SHOW', color: 'border-gray-400', bgColor: 'bg-gray-50' },
+];
+
+export function BookingKanban({ bookings, onStatusChange, onEdit, onDelete }: BookingKanbanProps) {
+  const getColumnBookings = (status: BookingStatus) => 
+    bookings.filter((b) => b.status === status);
+
+  return (
+    <div className="overflow-x-auto pb-4">
+      <div className="flex gap-4 min-w-max">
+        {KANBAN_COLUMNS.map((column) => {
+          const columnBookings = getColumnBookings(column.status);
+          
+          return (
+            <div key={column.status} className={`border-2 ${column.color} ${column.bgColor} w-[300px] flex-shrink-0`}>
+            {/* Column Header */}
+            <div className={`border-b-2 ${column.color} p-2 font-bold text-center text-xs`}>
+              <span>{column.label}</span>
+              <span className="ml-2 px-2 py-0.5 bg-white border border-black text-[10px]">
+                {columnBookings.length}
+              </span>
+            </div>
+            
+            {/* Column Cards */}
+            <div className="p-2 space-y-2 min-h-[200px] max-h-[500px] overflow-y-auto">
+              {columnBookings.length === 0 ? (
+                <div className="text-center text-xs text-gray-400 py-4">No bookings</div>
+              ) : (
+                columnBookings.map((booking) => (
+                  <div key={booking.id} className="bg-white border-2 border-black p-2 text-xs">
+                    {/* Header with time and status dropdown */}
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="font-bold text-[10px]">
+                        {format(booking.time, 'HH:mm')}
+                      </span>
+                      <select
+                        value={booking.status}
+                        onChange={(e) => onStatusChange(booking.id, e.target.value as BookingStatus)}
+                        className="text-[10px] border border-black px-1 py-0.5 cursor-pointer"
+                      >
+                        {KANBAN_COLUMNS.map((col) => (
+                          <option key={col.status} value={col.status}>
+                            {col.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    {/* Name */}
+                    <p className="font-bold text-sm mb-1">{booking.name}</p>
+                    
+                    {/* Info row */}
+                    <div className="flex flex-wrap gap-1 text-[10px] text-gray-600 mb-2">
+                      <span className="flex items-center gap-0.5">
+                        <Users size={10} /> {booking.amount}
+                      </span>
+                      <span>{booking.phone}</span>
+                      {booking.tableId && (
+                        <span className="px-1 border border-gray-300">T{booking.tableId}</span>
+                      )}
+                      {booking.source && (
+                        <span className="px-1 border border-gray-300">
+                          {BOOKING_SOURCE_CONFIG[booking.source]?.label}
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Notes */}
+                    {booking.notes && (
+                      <p className="text-[10px] text-gray-500 italic mb-2 truncate">
+                        &quot;{booking.notes}&quot;
+                      </p>
+                    )}
+                    
+                    {/* Actions */}
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => onEdit(booking)}
+                        className="flex-1 px-2 py-1 border border-black text-[10px] font-bold hover:bg-gray-100"
+                      >
+                        EDIT
+                      </button>
+                      <button
+                        onClick={() => onDelete(booking.id)}
+                        className="px-2 py-1 border border-red-400 text-red-600 text-[10px] font-bold hover:bg-red-50"
+                      >
+                        DEL
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })}
+      </div>
+    </div>
+  );
+}

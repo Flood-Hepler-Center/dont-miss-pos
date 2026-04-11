@@ -5,8 +5,8 @@ import { format } from 'date-fns';
 import { message } from 'antd';
 import { bookingService } from '@/lib/services/booking.service';
 import type { Booking, BookingStatus, BookingSource } from '@/types';
-import { BookingStats, BookingForm, BookingList } from './BookingComponents';
-import { Plus, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { BookingStats, BookingForm, BookingList, BookingKanban } from './BookingComponents';
+import { Plus, Calendar, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
 
 type BookingPageContentProps = {
   // Optional: if true, show additional admin features
@@ -21,6 +21,7 @@ export function BookingPageContent({ isAdmin = false }: BookingPageContentProps)
   const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
   const [formLoading, setFormLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
 
   // Subscribe to bookings for selected date
   useEffect(() => {
@@ -170,7 +171,27 @@ export function BookingPageContent({ isAdmin = false }: BookingPageContentProps)
         <BookingStats stats={stats} />
 
         {/* Actions */}
-        <div className="flex justify-end mb-4">
+        <div className="flex justify-between items-center mb-4">
+          {/* View Toggle */}
+          <div className="flex border-2 border-black">
+            <button
+              onClick={() => setViewMode('kanban')}
+              className={`px-3 py-2 text-xs font-bold flex items-center gap-1 ${
+                viewMode === 'kanban' ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'
+              }`}
+            >
+              <LayoutGrid size={14} /> KANBAN
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-2 text-xs font-bold flex items-center gap-1 border-l-2 border-black ${
+                viewMode === 'list' ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'
+              }`}
+            >
+              <List size={14} /> LIST
+            </button>
+          </div>
+
           <button
             onClick={() => setShowForm(true)}
             className="px-4 py-2 border-2 border-black bg-black text-white font-bold text-sm hover:bg-gray-800 flex items-center gap-2"
@@ -179,11 +200,18 @@ export function BookingPageContent({ isAdmin = false }: BookingPageContentProps)
           </button>
         </div>
 
-        {/* Booking List */}
+        {/* Booking View */}
         {loading ? (
           <div className="border-2 border-black p-12 text-center">
             <p className="text-sm">LOADING...</p>
           </div>
+        ) : viewMode === 'kanban' ? (
+          <BookingKanban
+            bookings={bookings}
+            onStatusChange={handleStatusChange}
+            onEdit={(booking) => setEditingBooking(booking)}
+            onDelete={(id) => setDeleteConfirm(id)}
+          />
         ) : (
           <BookingList
             bookings={bookings}
