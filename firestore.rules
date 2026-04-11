@@ -96,5 +96,11 @@ service cloud.firestore {
       allow update: if true; // Staff can acknowledge/complete
       allow delete: if false;
     }
+    
+    // Bookings: Staff and admin manage
+    match /bookings/{bookingId} {
+      allow read: if true;
+      allow write: if true; // Staff/admin can create, update, delete bookings
+    }
   }
 }
