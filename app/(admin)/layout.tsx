@@ -3,11 +3,13 @@
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/stores/authStore';
+import { useLateBookingsCount } from '@/lib/hooks/useLateBookingsCount';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, role, logout, _hasHydrated } = useAuthStore();
+  const lateBookingsCount = useLateBookingsCount();
 
   useEffect(() => {
     if (_hasHydrated && (!isAuthenticated || role !== 'ADMIN')) {
@@ -111,11 +113,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
             <button
               onClick={() => router.push('/admin/bookings')}
-              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 relative ${
                 pathname === '/admin/bookings' ? 'bg-black text-white' : 'bg-white text-black'
               }`}
             >
               BOOKINGS
+              {/* Late bookings badge */}
+              {lateBookingsCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                  {lateBookingsCount}
+                </span>
+              )}
             </button>
 
             {/* ── ADMIN MANAGEMENT ── */}

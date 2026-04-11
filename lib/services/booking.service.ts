@@ -14,7 +14,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import type { Booking, BookingStatus, CreateBookingInput, UpdateBookingInput } from '@/types';
+import type { Booking, BookingStatus, BookingSource, CreateBookingInput, UpdateBookingInput } from '@/types';
 
 const COLLECTION_NAME = 'bookings';
 
@@ -29,13 +29,23 @@ export const bookingService = {
       throw new Error('Phone must be 10 digits starting with 0');
     }
 
-    const docRef = await addDoc(collection(db, COLLECTION_NAME), {
-      ...input,
+    // Remove undefined fields (Firebase doesn't allow undefined)
+    const data: Record<string, unknown> = {
+      name: input.name,
+      phone: input.phone,
+      amount: input.amount,
       time: input.time,
       status: 'PENDING' as BookingStatus,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    };
+    
+    // Only add optional fields if they have values
+    if (input.source) data.source = input.source;
+    if (input.tableId) data.tableId = input.tableId;
+    if (input.notes) data.notes = input.notes;
+
+    const docRef = await addDoc(collection(db, COLLECTION_NAME), data);
 
     return docRef.id;
   },
@@ -52,11 +62,22 @@ export const bookingService = {
       }
     }
 
-    const ref = doc(db, COLLECTION_NAME, id);
-    await updateDoc(ref, {
-      ...input,
+    // Remove undefined fields (Firebase doesn't allow undefined)
+    const data: Record<string, unknown> = {
       updatedAt: serverTimestamp(),
-    });
+    };
+    
+    // Only add fields that are defined
+    if (input.name !== undefined) data.name = input.name;
+    if (input.phone !== undefined) data.phone = input.phone;
+    if (input.amount !== undefined) data.amount = input.amount;
+    if (input.time !== undefined) data.time = input.time;
+    if (input.source !== undefined) data.source = input.source;
+    if (input.tableId !== undefined) data.tableId = input.tableId;
+    if (input.notes !== undefined) data.notes = input.notes;
+
+    const ref = doc(db, COLLECTION_NAME, id);
+    await updateDoc(ref, data);
   },
 
   /**
@@ -167,17 +188,29 @@ export const bookingService = {
    */
   fromFirestore(doc: { id: string; data: () => Record<string, unknown> }): Booking {
     const data = doc.data();
+    
+    // Helper to safely convert Firestore timestamp to Date
+    const toDate = (timestamp: unknown): Date => {
+      if (!timestamp) return new Date(); // Handle null/undefined from serverTimestamp()
+      if (timestamp instanceof Date) return timestamp;
+      if (typeof timestamp === 'object' && 'seconds' in timestamp) {
+        return new Date((timestamp as { seconds: number }).seconds * 1000);
+      }
+      return new Date();
+    };
+    
     return {
       id: doc.id,
       name: data.name as string,
       phone: data.phone as string,
       amount: data.amount as number,
-      time: data.time instanceof Date ? data.time : new Date((data.time as { seconds: number }).seconds * 1000),
+      time: toDate(data.time),
       status: data.status as BookingStatus,
+      source: data.source as BookingSource | undefined,
       notes: data.notes as string | undefined,
       tableId: data.tableId as string | undefined,
-      createdAt: data.createdAt instanceof Date ? data.createdAt : new Date((data.createdAt as { seconds: number }).seconds * 1000),
-      updatedAt: data.updatedAt instanceof Date ? data.updatedAt : new Date((data.updatedAt as { seconds: number }).seconds * 1000),
+      createdAt: toDate(data.createdAt),
+      updatedAt: toDate(data.updatedAt),
     };
   },
 

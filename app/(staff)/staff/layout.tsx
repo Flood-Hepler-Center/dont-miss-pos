@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/stores/authStore';
 import { StaffNotifications } from '@/components/staff/StaffNotifications';
+import { useLateBookingsCount } from '@/lib/hooks/useLateBookingsCount';
 
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -11,6 +12,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const { isAuthenticated, logout, staffId, staffName, _hasHydrated } = useAuthStore();
   const isKDS = pathname === '/staff/kds';
   const [navExpanded, setNavExpanded] = useState(!isKDS);
+  const lateBookingsCount = useLateBookingsCount();
 
   // Whenever the route changes to/from KDS, sync the nav state
   useEffect(() => {
@@ -107,13 +109,19 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
                 <button
                   key={item.path}
                   onClick={() => router.push(item.path)}
-                  className={`px-6 py-3 text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                  className={`px-6 py-3 text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 relative ${
                     pathname.startsWith(item.path)
                       ? 'bg-black text-white'
                       : 'bg-white text-black'
                   }`}
                 >
                   {item.label}
+                  {/* Late bookings badge */}
+                  {item.label === 'BOOKINGS' && lateBookingsCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                      {lateBookingsCount}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

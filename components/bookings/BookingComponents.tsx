@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { format } from 'date-fns';
 import type { Booking, BookingStatus, BookingSource } from '@/types';
 import { BOOKING_STATUS_CONFIG, BOOKING_SOURCE_CONFIG } from '@/types';
+import { isBookingLate } from '@/lib/hooks/useLateBookingsCount';
 import { X, Phone, Users, Clock, Check, XCircle, UserCheck } from 'lucide-react';
 
 // ============================================
@@ -306,9 +307,17 @@ type BookingCardProps = {
 export function BookingCard({ booking, onStatusChange, onEdit, onDelete }: BookingCardProps) {
   const timeStr = format(booking.time, 'HH:mm');
   const dateStr = format(booking.time, 'dd MMM');
+  const isLate = isBookingLate(booking);
 
   return (
-    <div className="border-2 border-black p-3 hover:bg-gray-50">
+    <div className={`border-2 p-3 hover:bg-gray-50 ${isLate ? 'border-red-500 border-4 bg-red-50' : 'border-black'}`}>
+      {/* Late indicator */}
+      {isLate && (
+        <div className="flex items-center gap-1 text-red-600 text-xs font-bold mb-2 animate-pulse">
+          <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+          LATE - Needs attention
+        </div>
+      )}
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
@@ -473,8 +482,17 @@ export function BookingKanban({ bookings, onStatusChange, onEdit, onDelete }: Bo
               {columnBookings.length === 0 ? (
                 <div className="text-center text-xs text-gray-400 py-4">No bookings</div>
               ) : (
-                columnBookings.map((booking) => (
-                  <div key={booking.id} className="bg-white border-2 border-black p-2 text-xs">
+                columnBookings.map((booking) => {
+                    const isLate = isBookingLate(booking);
+                    return (
+                  <div key={booking.id} className={`bg-white border-2 p-2 text-xs ${isLate ? 'border-red-500 border-4 bg-red-50' : 'border-black'}`}>
+                    {/* Late indicator */}
+                    {isLate && (
+                      <div className="flex items-center gap-1 text-red-600 text-[10px] font-bold mb-1 animate-pulse">
+                        <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                        LATE
+                      </div>
+                    )}
                     {/* Header with time and status dropdown */}
                     <div className="flex justify-between items-center mb-1">
                       <span className="font-bold text-[10px]">
@@ -535,7 +553,8 @@ export function BookingKanban({ bookings, onStatusChange, onEdit, onDelete }: Bo
                       </button>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
