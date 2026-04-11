@@ -236,7 +236,7 @@ export function BookingForm({ booking, onSubmit, onClose, loading }: BookingForm
             <label className="block text-xs font-bold mb-1">SOURCE</label>
             <select
               value={source}
-              onChange={(e) => setSource(e.target.value)}
+              onChange={(e) => setSource(e.target.value as BookingSource)}
               className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
             >
               {Object.entries(BOOKING_SOURCE_CONFIG).map(([key, config]) => (
