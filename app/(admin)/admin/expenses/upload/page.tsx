@@ -35,6 +35,7 @@ import type {
   PurchaseUnit,
   BaseUnit,
   ExpenseSKU,
+  AIExpenseJob,
 } from '@/types/expense';
 
 // ─── Step metadata ──────────────────────────────────────────────────────────
@@ -216,7 +217,7 @@ export default function ExpenseUploadPage() {
 
   // Firestore unsub refs for parallel multi-file subscriptions
   const multiSubsRef = useRef<Map<string, () => void>>(new Map());
-  const multiProcessingRef = useRef<Map<string, Set<string>>>(new Map());
+  const multiProcessingRef = useRef<Map<string, Map<string, number>>>(new Map());
 
   // ─── Single-file handler ───────────────────────────────────────────────
 
@@ -278,49 +279,64 @@ export default function ExpenseUploadPage() {
 
       const currentJobId = mf.jobId;
       const localId = mf.id;
-      
+
       const unsub = onSnapshot(doc(db, 'expense_ai_jobs', currentJobId), (snap) => {
         if (!snap.exists()) return;
-        const data = snap.data() as {
-          overallStatus: string;
-          finalResult?: AIExpenseFinalizerResult;
-          steps?: AIPipelineStepResult[];
-          errorMessage?: string;
-        };
+        const data = snap.data() as AIExpenseJob;
 
-        // --- PARALLEL NUDGE LOGIC ---
+        // --- SELF-HEAL & NUDGE LOGIC WITH VERBOSE LOGS ---
         if (data.overallStatus === 'running' || data.overallStatus === 'pending') {
+          const now = Date.now();
           const pendingSteps = data.steps?.filter(s => s.status === 'pending') || [];
           
-          for (const nextS of pendingSteps) {
-            // Steps 1, 2, 3 are independent
-            const isIndependent = nextS.stepNumber <= 3;
+          if (pendingSteps.length > 0) {
+            console.group(`🧠 [Multi AI] Job: ${currentJobId}`);
             
-            // Steps 4, 5 have prereqs
-            const allPrereqsDone = data.steps?.filter(s => s.stepNumber < nextS.stepNumber).every(s => s.status === 'done');
-            
-            const isValidToStart = isIndependent || allPrereqsDone;
-
-            // Get or create the set for this job
+            // Get or create the timestamp map for this specific job
             if (!multiProcessingRef.current.has(currentJobId)) {
-              multiProcessingRef.current.set(currentJobId, new Set());
+              multiProcessingRef.current.set(currentJobId, new Map());
             }
-            const jobSet = multiProcessingRef.current.get(currentJobId)!;
+            const jobMap = multiProcessingRef.current.get(currentJobId)!;
 
-            if (isValidToStart && !jobSet.has(nextS.step)) {
-              jobSet.add(nextS.step);
-              console.log(`🧠 [Multi] Nudging job ${currentJobId} step ${nextS.stepNumber}: ${nextS.step}`);
-              
-              fetch(`/api/expenses/ai/${currentJobId}/step`, { method: 'POST' })
-                .then(res => { 
-                  if (!res.ok) throw new Error(); 
-                  console.log(`✅ [Multi] Step ${nextS.step} nudge successful for ${currentJobId}`);
-                })
-                .catch(() => { 
-                  console.error(`❌ [Multi] Nudge failed for ${currentJobId} ${nextS.step}`);
-                  jobSet.delete(nextS.step); 
-                });
+            for (const nextS of pendingSteps) {
+              const isIndependent = nextS.stepNumber <= 3;
+              const allPrereqsDone = data.steps?.filter(s => s.stepNumber < nextS.stepNumber).every(s => s.status === 'done');
+              const isValidToStart = isIndependent || allPrereqsDone;
+
+              // Lock Check with Self-Heal (30s timeout)
+              const lockTime = jobMap.get(nextS.step);
+              const isStale = lockTime && (now - lockTime > 30000);
+              const isLocked = lockTime && !isStale;
+
+              if (isValidToStart && !isLocked) {
+                if (isStale) console.warn(`⚠️ [Multi] Re-nudging job ${currentJobId} step ${nextS.stepNumber} (stale)`);
+                
+                jobMap.set(nextS.step, now);
+                
+                const delay = isIndependent ? (nextS.stepNumber - 1) * 200 : 0;
+
+                setTimeout(() => {
+                  console.log(`🚀 [Multi] TRIGGERING ${currentJobId} Step ${nextS.stepNumber}: ${nextS.step} (Delay: ${delay}ms)`);
+                  
+                  fetch(`/api/expenses/ai/${currentJobId}/step`, { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ step: nextS.step })
+                  })
+                    .then(res => { 
+                      if (!res.ok) throw new Error(); 
+                      console.log(`✅ [Multi] Nudge success for ${currentJobId} - ${nextS.step}`);
+                    })
+                    .catch(() => { 
+                      console.error(`❌ [Multi] Nudge failed for ${currentJobId} ${nextS.step}`);
+                      jobMap.delete(nextS.step); 
+                    });
+                }, delay);
+              } else if (!isValidToStart) {
+                console.log(`⏳ [Multi] Waiting for prereqs: Step ${nextS.stepNumber}`);
+              }
             }
+            console.groupEnd();
           }
         } else if (data.overallStatus === 'completed' || data.overallStatus === 'needs_review' || data.overallStatus === 'failed') {
           multiProcessingRef.current.delete(currentJobId);
@@ -757,72 +773,72 @@ export default function ExpenseUploadPage() {
           {/* Multi-mode: show selected file's pipeline + review */}
           {isMultiMode && currentFileIndex >= 0 && (() => {
             const cur = multiFiles[currentFileIndex];
-          const curFinal = cur?.finalResult;
-            const curLines = editableLines.length > 0 ? editableLines.filter(l => !l._deleted) : (curFinal?.lines ?? []).map(l => ({...l, _dirty: false } as EditableLine));
-          const isProcessingCur = cur?.status === 'uploading' || cur?.status === 'processing';
-          const isReadyCur = cur?.status === 'ready' || cur?.status === 'confirmed';
+            const curFinal = cur?.finalResult;
+            const curLines = editableLines.length > 0 ? editableLines.filter(l => !l._deleted) : (curFinal?.lines ?? []).map(l => ({ ...l, _dirty: false } as EditableLine));
+            const isProcessingCur = cur?.status === 'uploading' || cur?.status === 'processing';
+            const isReadyCur = cur?.status === 'ready' || cur?.status === 'confirmed';
 
-          return (
-          <div>
-            <p className="text-xs font-bold mb-3">{cur?.file.name} — <span className={`${cur?.status === 'confirmed' ? 'text-green-600' : cur?.status === 'ready' ? 'text-orange-500' : cur?.status === 'error' ? 'text-red-500' : 'text-blue-600'}`}>{cur?.status?.toUpperCase()}</span></p>
+            return (
+              <div>
+                <p className="text-xs font-bold mb-3">{cur?.file.name} — <span className={`${cur?.status === 'confirmed' ? 'text-green-600' : cur?.status === 'ready' ? 'text-orange-500' : cur?.status === 'error' ? 'text-red-500' : 'text-blue-600'}`}>{cur?.status?.toUpperCase()}</span></p>
 
-            {/* Pipeline steps */}
-            <div className="space-y-1.5 mb-4">
-              {STEP_ORDER.map(step => {
-                const result = cur?.pipelineSteps?.find(s => s.step === step);
-                return <StepIndicator key={step} step={step} result={result} />;
-              })}
-            </div>
+                {/* Pipeline steps */}
+                <div className="space-y-1.5 mb-4">
+                  {STEP_ORDER.map(step => {
+                    const result = cur?.pipelineSteps?.find(s => s.step === step);
+                    return <StepIndicator key={step} step={step} result={result} />;
+                  })}
+                </div>
 
-            {cur?.status === 'error' && (
-              <div className="border-2 border-red-500 bg-red-50 p-3 mb-4">
-                <p className="text-xs font-bold text-red-700">PIPELINE FAILED</p>
-                <p className="text-xs text-red-600 mt-1">{cur.errorMessage}</p>
+                {cur?.status === 'error' && (
+                  <div className="border-2 border-red-500 bg-red-50 p-3 mb-4">
+                    <p className="text-xs font-bold text-red-700">PIPELINE FAILED</p>
+                    <p className="text-xs text-red-600 mt-1">{cur.errorMessage}</p>
+                  </div>
+                )}
+
+                {isProcessingCur && (
+                  <div className="text-center py-8 text-gray-400">
+                    <Loader2 size={24} className="animate-spin mx-auto mb-2" />
+                    <p className="text-xs">Processing in parallel with other receipts...</p>
+                  </div>
+                )}
+
+                {isReadyCur && curFinal && curLines.length > 0 && !savedId && (
+                  <ReviewTable
+                    lines={curLines}
+                    finalResult={curFinal}
+                    skus={skus}
+                    saving={saving}
+                    manualEditMode={manualEditMode}
+                    manualVendor={manualVendor}
+                    manualDate={manualDate}
+                    manualReceiptNo={manualReceiptNo}
+                    manualTax={manualTax}
+                    manualServiceCharge={manualServiceCharge}
+                    setManualVendor={setManualVendor}
+                    setManualDate={setManualDate}
+                    setManualReceiptNo={setManualReceiptNo}
+                    setManualTax={setManualTax}
+                    setManualServiceCharge={setManualServiceCharge}
+                    setManualEditMode={setManualEditMode}
+                    setEditableLines={setEditableLines}
+                    editableLines={editableLines}
+                    handleLineChange={handleLineChange}
+                    handleLineSkuSelect={handleLineSkuSelect}
+                    handleLineClearSku={handleLineClearSku}
+                    handleConfirmSave={handleConfirmSave}
+                    onDiscard={() => {
+                      setEditableLines([]); setSavedId(null); setManualEditMode(false);
+                    }}
+                  />
+                )}
+
+                {savedId && (
+                  <SavedSuccess savedId={savedId} onViewExpense={() => router.push(`/admin/expenses/${savedId}`)} onUploadAnother={() => { reset(); setPreviewUrl(null); setEditableLines([]); setSavedId(null); setManualEditMode(false); }} onAllExpenses={() => router.push('/admin/expenses')} />
+                )}
               </div>
-            )}
-
-            {isProcessingCur && (
-              <div className="text-center py-8 text-gray-400">
-                <Loader2 size={24} className="animate-spin mx-auto mb-2" />
-                <p className="text-xs">Processing in parallel with other receipts...</p>
-              </div>
-            )}
-
-            {isReadyCur && curFinal && curLines.length > 0 && !savedId && (
-              <ReviewTable
-                lines={curLines}
-                finalResult={curFinal}
-                skus={skus}
-                saving={saving}
-                manualEditMode={manualEditMode}
-                manualVendor={manualVendor}
-                manualDate={manualDate}
-                manualReceiptNo={manualReceiptNo}
-                manualTax={manualTax}
-                manualServiceCharge={manualServiceCharge}
-                setManualVendor={setManualVendor}
-                setManualDate={setManualDate}
-                setManualReceiptNo={setManualReceiptNo}
-                setManualTax={setManualTax}
-                setManualServiceCharge={setManualServiceCharge}
-                setManualEditMode={setManualEditMode}
-                setEditableLines={setEditableLines}
-                editableLines={editableLines}
-                handleLineChange={handleLineChange}
-                handleLineSkuSelect={handleLineSkuSelect}
-                handleLineClearSku={handleLineClearSku}
-                handleConfirmSave={handleConfirmSave}
-                onDiscard={() => {
-                  setEditableLines([]); setSavedId(null); setManualEditMode(false);
-                }}
-              />
-            )}
-
-            {savedId && (
-              <SavedSuccess savedId={savedId} onViewExpense={() => router.push(`/admin/expenses/${savedId}`)} onUploadAnother={() => { reset(); setPreviewUrl(null); setEditableLines([]); setSavedId(null); setManualEditMode(false); }} onAllExpenses={() => router.push('/admin/expenses')} />
-            )}
-          </div>
-          );
+            );
           })()}
 
           {/* Single-file mode */}

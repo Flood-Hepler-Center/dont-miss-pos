@@ -9,10 +9,13 @@ export async function POST(
 ) {
   try {
     const jobId = params.jobId;
+    const body = await _req.json().catch(() => ({}));
+    const targetStep = body.step;
+
     const skus = await expenseSKUService.getAll();
     
-    // Execute exactly one pending step
-    const result = await expenseAIService.runStep(jobId, skus);
+    // Execute exactly one targeted pending step
+    const result = await expenseAIService.runStep(jobId, skus, targetStep);
 
     return NextResponse.json(result, { status: 200 });
   } catch (error) {

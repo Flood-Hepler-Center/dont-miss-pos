@@ -14,7 +14,7 @@ export function useExpenseAI() {
   const [uploadState, setUploadState] = useState<UploadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [finalResult, setFinalResult] = useState<AIExpenseFinalizerResult | null>(null);
-  const processingRef = useRef<Set<string>>(new Set());
+  const processingRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     if (!jobId) return;
@@ -22,7 +22,7 @@ export function useExpenseAI() {
       if (!snap.exists()) return;
       const data = snap.data() as AIExpenseJob;
       setJob({ ...data, id: snap.id });
-      
+
       if (data.overallStatus === 'completed') {
         setUploadState('done');
         setFinalResult(data.finalResult ?? null);
@@ -37,48 +37,60 @@ export function useExpenseAI() {
         processingRef.current.clear();
       } else if (data.overallStatus === 'running' || data.overallStatus === 'pending') {
         setUploadState('processing');
-        
-        // --- PARALLEL NUDGE LOGIC ---
+
+        // --- SELF-HEAL & NUDGE LOGIC ---
+        const now = Date.now();
         const pendingSteps = data.steps?.filter(s => s.status === 'pending') || [];
-        
-        for (const nextStep of pendingSteps) {
-          // Rule 1: Step 1, 2, and 3 are independent and can run in parallel
-          const isIndependent = nextStep.stepNumber <= 3;
-          
-          // Rule 2: Step 4 and 5 have dependencies
-          const allPrereqsDone = data.steps?.filter(s => s.stepNumber < nextStep.stepNumber).every(s => s.status === 'done');
-          
-          // Rule 3: Validation Check
-          const validatorRes = data.steps?.find(s => s.step === 'bill_validator')?.result as AIBillValidatorResult | undefined;
-          const isStep1Done = data.steps?.find(s => s.step === 'bill_validator')?.status === 'done';
-          const isStep1Pass = isStep1Done && validatorRes?.is_valid_document !== false;
 
-          const isValidToStart = isIndependent || (allPrereqsDone && (
-            nextStep.step === 'sku_matcher' ? isStep1Pass : true
-          ));
+        if (pendingSteps.length > 0) {
+          console.group(`🧠 [AI Logic] Job: ${jobId}`);
+          data.steps?.forEach(s => console.log(`Step ${s.stepNumber} (${s.step}): ${s.status}`));
 
-          if (isValidToStart && !processingRef.current.has(nextStep.step)) {
-            // LOCK this individual step
-            processingRef.current.add(nextStep.step);
-            console.log(`🧠 [AI] Nudging ${nextStep.stepNumber}/5: ${nextStep.step}`);
-            
-            fetch(`/api/expenses/ai/${jobId}/step`, { method: 'POST' })
-              .then(async res => {
-                if (!res.ok) {
-                  const errData = await res.json().catch(() => ({}));
-                  throw new Error(errData.error ?? 'Step failed');
-                }
-                console.log(`✅ [AI] Step ${nextStep.step} nudge successful`);
-                // Note: We DON'T remove from Set here. 
-                // We Wait for Firestore to say 'done' or 'running', which then naturally 
-                // stops 'pendingSteps' from finding it.
-              })
-              .catch(err => {
-                console.error(`❌ [AI] Nudge failed for ${nextStep.step}:`, err);
-                // ONLY unlock on error to allow retry if the job is still pending
-                processingRef.current.delete(nextStep.step); 
-              });
+          for (const nextStep of pendingSteps) {
+            const isIndependent = nextStep.stepNumber <= 3;
+            const allPrereqsDone = data.steps?.filter(s => s.stepNumber < nextStep.stepNumber).every(s => s.status === 'done');
+            const isValidToStart = isIndependent || allPrereqsDone;
+
+            // Lock Check with Self-Heal (30s timeout)
+            const lockTime = processingRef.current.get(nextStep.step);
+            const isStale = lockTime && (now - lockTime > 30000);
+            const isLocked = lockTime && !isStale;
+
+            if (isValidToStart && !isLocked) {
+              if (isStale) console.warn(`⚠️ [AI] Re-nudging stale step: ${nextStep.step} (timed out)`);
+              
+              processingRef.current.set(nextStep.step, now);
+              
+              // Stagger the parallel nudges to reduce DB contention
+              const delay = isIndependent ? (nextStep.stepNumber - 1) * 200 : 0;
+              
+              setTimeout(() => {
+                console.log(`🚀 [AI] TRIGGERING Step ${nextStep.stepNumber}: ${nextStep.step} (Delay: ${delay}ms)`);
+
+                fetch(`/api/expenses/ai/${jobId}/step`, { 
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ step: nextStep.step })
+                })
+                  .then(async res => {
+                    if (!res.ok) {
+                      const errData = await res.json().catch(() => ({}));
+                      throw new Error(errData.error ?? 'Step failed');
+                    }
+                    console.log(`✅ [AI] Nudge success for ${nextStep.step}`);
+                  })
+                  .catch(err => {
+                    console.error(`❌ [AI] Nudge failed for ${nextStep.step}:`, err);
+                    processingRef.current.delete(nextStep.step);
+                  });
+              }, delay);
+            } else if (!isValidToStart) {
+              console.log(`⏳ [AI] Step ${nextStep.stepNumber} is waiting for prerequisites.`);
+            } else {
+              console.log(`🔄 [AI] Already processing: ${nextStep.step}`);
+            }
           }
+          console.groupEnd();
         }
       }
     });

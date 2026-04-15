@@ -18,6 +18,7 @@ import {
   collection,
   serverTimestamp,
   Timestamp,
+  runTransaction,
 } from 'firebase/firestore';
 // import { generateObject } from 'ai';
 import { db } from '@/lib/firebase/config';
@@ -189,17 +190,34 @@ export async function updateJobStep(
   update: Partial<AIPipelineStepResult>
 ): Promise<void> {
   const jobRef = doc(db, JOBS_COL, jobId);
-  const snap = await getDoc(jobRef);
-  if (!snap.exists()) return;
-  const data = snap.data() as Record<string, unknown>;
-  const steps = (data.steps as AIPipelineStepResult[]) ?? [];
-  const idx = steps.findIndex((s) => s.step === step);
-  if (idx >= 0) {
-    steps[idx] = { ...steps[idx], ...update };
-  } else {
-    steps.push({ step, stepNumber: STEP_NUMBERS[step], model: STEP_MODELS[step], status: 'pending', ...update });
-  }
-  await updateDoc(jobRef, { steps, currentStep: step, updatedAt: serverTimestamp() });
+  
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(jobRef);
+    if (!snap.exists()) return;
+    
+    const data = snap.data() as Record<string, unknown>;
+    const steps = [...((data.steps as AIPipelineStepResult[]) ?? [])];
+    const idx = steps.findIndex((s) => s.step === step);
+    
+    if (idx >= 0) {
+      steps[idx] = { ...steps[idx], ...update, updatedAt: new Date() };
+    } else {
+      steps.push({ 
+        step, 
+        stepNumber: STEP_NUMBERS[step], 
+        model: STEP_MODELS[step], 
+        status: 'pending', 
+        ...update,
+        updatedAt: new Date()
+      });
+    }
+
+    transaction.update(jobRef, { 
+      steps, 
+      currentStep: step, 
+      updatedAt: serverTimestamp() 
+    });
+  });
 }
 
 // ─── Step 1: Bill Validator ───────────────────────────────────────────────────
@@ -208,8 +226,8 @@ export async function runBillValidator(
   jobId: string,
   imageUrl: string
 ): Promise<AIBillValidatorResult> {
+  // Redundant status update removed (Dispatcher handles 'running' state)
   const startedAt = new Date();
-  await updateJobStep(jobId, 'bill_validator', { status: 'running', startedAt });
 
   const messages: OpenRouterMessage[] = [
     {
@@ -258,8 +276,8 @@ export async function runQualityAssessor(
   jobId: string,
   imageUrl: string
 ): Promise<AIQualityResult> {
+  // Redundant status update removed
   const startedAt = new Date();
-  await updateJobStep(jobId, 'quality_assessor', { status: 'running', startedAt });
 
   const messages: OpenRouterMessage[] = [
     {
@@ -307,8 +325,8 @@ export async function runOCRExtractor(
   jobId: string,
   imageUrl: string
 ): Promise<AIOCRResult> {
+  // Redundant status update removed
   const startedAt = new Date();
-  await updateJobStep(jobId, 'ocr_extractor', { status: 'running', startedAt });
 
   const messages: OpenRouterMessage[] = [
     {
@@ -852,27 +870,60 @@ export const expenseAIService = {
     } as AIExpenseJob;
   },
 
-  async runStep(jobId: string, existingSKUs: ExpenseSKU[]): Promise<{ status: string; currentStep: AIPipelineStep | null }> {
+  async runStep(
+    jobId: string, 
+    skus: ExpenseSKU[],
+    targetStep?: string
+  ): Promise<{ status: string; currentStep: string | null }> {
     const jobRef = doc(db, JOBS_COL, jobId);
-    const snap = await getDoc(jobRef);
-    if (!snap.exists()) throw new Error('Job not found');
+    
+    // Use TRANSACTION to pick the next step and mark it running atomically
+    const nextStep = await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(jobRef);
+      if (!snap.exists()) throw new Error('Job not found');
+      
+      const data = snap.data();
+      const steps = (data.steps as AIPipelineStepResult[]) ?? [];
 
-    const data = snap.data();
-    const steps = (data.steps as AIPipelineStepResult[]) ?? [];
-    const imageUrl = data.imageUrl as string;
+      // Determine the first pending step that is READY to run
+      const nextStepIdx = steps.findIndex(s => {
+        if (s.status !== 'pending') return false;
+        
+        // If targetStep is provided, ONLY run that one
+        if (targetStep && s.step !== targetStep) return false;
 
-    // Determine the first pending step that is READY to run
-    // Rule: Steps 1, 2, 3 can run anytime they are pending
-    // Rule: Step 4, 5 need all previous steps to be 'done'
-    const nextStepIdx = steps.findIndex(s => {
-      if (s.status !== 'pending') return false;
-      if (s.stepNumber <= 3) return true;
-      return steps.filter(prev => prev.stepNumber < s.stepNumber).every(prev => prev.status === 'done');
+        if (s.stepNumber <= 3) return true;
+        return steps.filter(prev => prev.stepNumber < s.stepNumber).every(prev => prev.status === 'done');
+      });
+
+      if (nextStepIdx === -1) return null;
+
+      const stepName = steps[nextStepIdx].step;
+      
+      // Update overall status to running if needed
+      const updates: Record<string, any> = { currentStep: stepName };
+      if (data.overallStatus === 'pending') updates.overallStatus = 'running';
+
+      // Update specific step status
+      const updatedSteps = [...steps];
+      updatedSteps[nextStepIdx] = { 
+        ...updatedSteps[nextStepIdx], 
+        status: 'running', 
+        startedAt: new Date(),
+        updatedAt: new Date()
+      };
+      updates.steps = updatedSteps;
+
+      transaction.update(jobRef, { ...updates, updatedAt: serverTimestamp() });
+      return stepName;
     });
 
-    if (nextStepIdx === -1) {
+    if (!nextStep) {
+      const snap = await getDoc(jobRef);
+      const data = snap.data()!;
+      
       if (data.overallStatus === 'running' || data.overallStatus === 'pending') {
-        // All steps done, finalize status if not already
+        const steps = (data.steps as AIPipelineStepResult[]) ?? [];
         const lastStepResult = steps.find(s => s.step === 'expense_finalizer')?.result as AIExpenseFinalizerResult | undefined;
         if (lastStepResult) {
           const finalStatus = lastStepResult.requires_review ? 'needs_review' : 'completed';
@@ -882,20 +933,10 @@ export const expenseAIService = {
       return { status: data.overallStatus, currentStep: null };
     }
 
-    const nextStep = steps[nextStepIdx].step;
-
-    // Auto-transition to 'running' if this is the first step trigger
-    if (data.overallStatus === 'pending') {
-      await updateDoc(jobRef, { overallStatus: 'running', updatedAt: serverTimestamp() });
-    }
-
-    // CRITICAL: Mark this step as 'running' immediately so other parallel triggers don't pick it
-    await updateJobStep(jobId, nextStep, {
-      status: 'running',
-      startedAt: new Date()
-    });
-
-    console.log(`\n⏳ [AI STEP] Executing "${nextStep}" for job: ${jobId}`);
+    console.log(`\n🚀 [AI STEP] Executing "${nextStep}" for job: ${jobId}${targetStep ? ` (Strict Targeted: ${targetStep})` : ''}`);
+    const snap2 = await getDoc(jobRef);
+    const data2 = snap2.data();
+    const imageUrl = data2?.imageUrl as string;
 
     try {
       if (nextStep === 'bill_validator') {
@@ -928,7 +969,7 @@ export const expenseAIService = {
           console.error('[runStep] OCR result still missing in Firestore even after re-fetch', { jobId });
           throw new Error('OCR result missing');
         }
-        await runSKUMatcher(jobId, ocrStep.result as AIOCRResult, existingSKUs);
+        await runSKUMatcher(jobId, ocrStep.result as AIOCRResult, skus);
       } else if (nextStep === 'expense_finalizer') {
         // Step 5 needs step 3 & 4 results. Force re-fetch.
         const freshSnap = await getDoc(jobRef);
@@ -941,7 +982,7 @@ export const expenseAIService = {
           jobId, 
           ocrResult as AIOCRResult, 
           matcherResult as AISKUMatcherResult, 
-          existingSKUs
+          skus
         );
 
         const finalStatus = finalResult.requires_review ? 'needs_review' : 'completed';

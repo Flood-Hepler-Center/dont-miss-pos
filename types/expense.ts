@@ -201,6 +201,7 @@ export type AIPipelineStepResult = {
   outputTokens?: number;
   result?: unknown;
   error?: string;
+  updatedAt?: Date;
 };
 
 export type AIBillValidatorResult = {
