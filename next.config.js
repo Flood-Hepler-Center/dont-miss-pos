@@ -11,6 +11,7 @@ const nextConfig = {
   images: {
     domains: ['firebasestorage.googleapis.com'],
   },
+  serverExternalPackages: ['exceljs'],
 };
 
 module.exports = nextConfig;

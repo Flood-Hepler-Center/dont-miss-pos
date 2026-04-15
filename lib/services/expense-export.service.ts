@@ -390,40 +390,54 @@ function buildInventorySheet(wb: ExcelJS.Workbook, lines: ExpenseLine[], skus: E
 
 export const expenseExportService = {
   async generateExcel(filter: ExpenseExportFilter): Promise<Buffer> {
+    const isSingleDoc = !!filter.documentId;
+
+    // 1. Fetch the documents and lines
+    // If single doc, we ignore the date range and category filters
     const [rawLines, rawDocs, skus] = await Promise.all([
       expenseLineService.getFiltered({
         startDate: filter.startDate,
         endDate: filter.endDate,
-        mainCategory: filter.mainCategory,
-        subCategory: filter.subCategory,
-        vendorId: filter.vendorId,
-        skuId: filter.skuId,
+        documentId: filter.documentId,
       }),
       expenseDocumentService.getFiltered({
         startDate: filter.startDate,
         endDate: filter.endDate,
         status: filter.status,
+        documentId: filter.documentId,
       }),
       expenseSKUService.getAll(),
     ]);
 
-    // Explicitly filter out any Cancelled documents just in case
+    // 2. Data Preparation
     const docs = rawDocs.filter(d => d.status !== 'cancelled');
+    const docMap = new Map(docs.map(d => [d.id, d]));
     const validDocIds = new Set(docs.map(d => d.id));
-    
-    // Filter lines down to only those that belong to non-cancelled documents
-    const lines = rawLines.filter(l => validDocIds.has(l.documentId));
+    const allLines = rawLines.filter(l => validDocIds.has(l.documentId));
 
+    // For "Summary" and "Expense Lines" sheets, we respect the user's category/vendor filters
+    let displayLines = [...allLines];
+    if (!isSingleDoc) {
+      if (filter.mainCategory) displayLines = displayLines.filter(l => l.mainCategory === filter.mainCategory);
+      if (filter.subCategory) displayLines = displayLines.filter(l => l.subCategory === filter.subCategory);
+      if (filter.vendorId) displayLines = displayLines.filter(l => docMap.get(l.documentId)?.vendorId === filter.vendorId);
+      if (filter.skuId) displayLines = displayLines.filter(l => l.skuId === filter.skuId);
+    }
+
+    // 3. Workbook Generation
     const wb = new ExcelJS.Workbook();
     wb.creator = "Don't Miss POS";
     wb.created = new Date();
-    wb.modified = new Date();
-    wb.lastPrinted = new Date();
 
-    buildSummarySheet(wb, lines, filter);
-    buildLineItemsSheet(wb, lines, docs);
-    buildCAPEXSheet(wb, lines);
-    buildInventorySheet(wb, lines, skus);
+    // Standard detailed sheets (respect filters)
+    buildSummarySheet(wb, displayLines, filter);
+    buildLineItemsSheet(wb, displayLines, docs);
+
+    // Global analysis sheets (always use ALL lines in the date range to keep registers complete)
+    // UNLESS it's a single document export, then we keep it focused
+    const analysisLines = isSingleDoc ? displayLines : allLines;
+    buildCAPEXSheet(wb, analysisLines);
+    buildInventorySheet(wb, analysisLines, skus);
 
     const buffer = await wb.xlsx.writeBuffer();
     return Buffer.from(buffer);

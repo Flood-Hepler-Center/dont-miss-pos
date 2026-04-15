@@ -1,7 +1,7 @@
 import { collection, getDocs, doc, writeBatch, serverTimestamp, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { COL } from './expense.service';
-import type { ExpenseDocument, ExpenseLine, ExpenseSKU } from '@/types/expense';
+import type { ExpenseLine, ExpenseSKU } from '@/types/expense';
 
 export const expenseSyncService = {
   /**
@@ -72,7 +72,7 @@ export const expenseSyncService = {
       skuAccums[sku.id].totalQty += lineBaseQty;
       skuAccums[sku.id].totalCost += line.finalAmount;
       
-      const docDate = line.documentDate instanceof Date ? line.documentDate : new Date(line.documentDate as any);
+      const docDate = line.documentDate instanceof Date ? line.documentDate : new Date(line.documentDate as unknown as string);
       if (docDate >= skuAccums[sku.id].latestDate) {
         skuAccums[sku.id].latestDate = docDate;
         skuAccums[sku.id].latestPrice = lineBaseQty > 0 ? line.finalAmount / lineBaseQty : 0;

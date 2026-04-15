@@ -239,6 +239,14 @@ export const expenseDocumentService = {
   },
 
   async getFiltered(filter: ExpenseFilter): Promise<ExpenseDocument[]> {
+    // Optimization: If a specific document ID is requested, fetch only that one
+    if (filter.documentId) {
+      const docId = filter.documentId;
+      const snap = await getDoc(doc(db, COL.DOCUMENTS, docId));
+      if (!snap.exists()) return [];
+      return [fromFirestoreDoc<ExpenseDocument>(snap)];
+    }
+
     let q = query(collection(db, COL.DOCUMENTS), orderBy('documentDate', 'desc'));
     if (filter.status) {
       q = query(q, where('status', '==', filter.status));
@@ -320,6 +328,11 @@ export const expenseLineService = {
   },
 
   async getFiltered(filter: ExpenseFilter): Promise<ExpenseLine[]> {
+    // Priority filter: If documentId is provided, just get lines for that document
+    if (filter.documentId) {
+      return this.getByDocumentId(filter.documentId);
+    }
+
     let q = query(collection(db, COL.LINES), orderBy('documentDate', 'desc'));
     if (filter.mainCategory) {
       q = query(q, where('mainCategory', '==', filter.mainCategory));
@@ -389,11 +402,13 @@ export const expenseStatsService = {
 
     const confirmed = documents.filter((d) => d.status === 'confirmed');
     const totalAmount = confirmed.reduce((s, d) => s + d.total, 0);
+    const validDocIds = new Set(confirmed.map((d) => d.id));
+    const validLines = lines.filter((l) => validDocIds.has(l.documentId));
 
     const categoryTotals: Record<string, number> = {};
     const vendorTotals: Record<string, number> = {};
 
-    for (const line of lines) {
+    for (const line of validLines) {
       const cat = line.subCategory ?? 'other';
       categoryTotals[cat] = (categoryTotals[cat] ?? 0) + line.finalAmount;
       vendorTotals[line.vendorName] = (vendorTotals[line.vendorName] ?? 0) + line.finalAmount;
@@ -402,10 +417,10 @@ export const expenseStatsService = {
     return {
       totalDocuments: confirmed.length,
       totalAmount,
-      capexTotal: lines.filter((l) => l.mainCategory === 'capex').reduce((s, l) => s + l.finalAmount, 0),
-      inventoryTotal: lines.filter((l) => l.mainCategory === 'inventory').reduce((s, l) => s + l.finalAmount, 0),
-      operatingTotal: lines.filter((l) => l.mainCategory === 'operating').reduce((s, l) => s + l.finalAmount, 0),
-      utilityTotal: lines.filter((l) => l.mainCategory === 'utility').reduce((s, l) => s + l.finalAmount, 0),
+      capexTotal: validLines.filter((l) => l.mainCategory === 'capex').reduce((s, l) => s + l.finalAmount, 0),
+      inventoryTotal: validLines.filter((l) => l.mainCategory === 'inventory').reduce((s, l) => s + l.finalAmount, 0),
+      operatingTotal: validLines.filter((l) => l.mainCategory === 'operating').reduce((s, l) => s + l.finalAmount, 0),
+      utilityTotal: validLines.filter((l) => l.mainCategory === 'utility').reduce((s, l) => s + l.finalAmount, 0),
       aiProcessed: documents.filter((d) => d.isAiExtracted).length,
       pendingReview: documents.filter((d) => d.requiresReview && d.status === 'ai_review').length,
       topCategories: Object.entries(categoryTotals)

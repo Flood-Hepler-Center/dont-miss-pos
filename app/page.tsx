@@ -24,7 +24,7 @@ export default function Home() {
             [ OPEN ACCESS ]
           </a>
         </div>
-        <div className="text-[10px] text-gray-400 font-mono mt-8">
+        <div className="text-[10px] text-gray-400 font-mono mt-8" suppressHydrationWarning>
           TIMESTAMP: {new Date().toISOString().split('T')[0]}<br />
           LOC: {new Date().toLocaleTimeString()}
         </div>

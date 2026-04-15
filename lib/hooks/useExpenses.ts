@@ -22,15 +22,24 @@ export function useExpenseDocuments(filter?: ExpenseFilter) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const { startDate, endDate, status, searchText } = filter || {};
+  const startIso = startDate?.toISOString() ?? '';
+  const endIso = endDate?.toISOString() ?? '';
+
   useEffect(() => {
     setLoading(true);
     const unsub = expenseDocumentService.subscribeAll((docs) => {
       let filtered = docs;
-      if (filter?.startDate) filtered = filtered.filter((d) => d.documentDate >= filter.startDate!);
-      if (filter?.endDate) filtered = filtered.filter((d) => d.documentDate <= filter.endDate!);
-      if (filter?.status) filtered = filtered.filter((d) => d.status === filter.status);
-      if (filter?.searchText) {
-        const q = filter.searchText.toLowerCase();
+      
+      const parsedStart = startIso ? new Date(startIso) : null;
+      const parsedEnd = endIso ? new Date(endIso) : null;
+
+      if (parsedStart) filtered = filtered.filter((d) => d.documentDate >= parsedStart);
+      if (parsedEnd) filtered = filtered.filter((d) => d.documentDate <= parsedEnd);
+      if (status) filtered = filtered.filter((d) => d.status === status);
+      
+      if (searchText) {
+        const q = searchText.toLowerCase();
         filtered = filtered.filter(
           (d) =>
             d.vendorName.toLowerCase().includes(q) ||
@@ -43,12 +52,7 @@ export function useExpenseDocuments(filter?: ExpenseFilter) {
       setError(null);
     });
     return () => unsub();
-  }, [
-    filter?.startDate?.toISOString(),
-    filter?.endDate?.toISOString(),
-    filter?.status,
-    filter?.searchText,
-  ]);
+  }, [startIso, endIso, status, searchText]);
 
   const confirmDocument = useCallback(async (id: string) => {
     await expenseDocumentService.confirm(id, 'admin');
@@ -126,20 +130,27 @@ export function useExpenseStats(filter: ExpenseFilter) {
   const [stats, setStats] = useState<ExpenseStats | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const { startDate, endDate, mainCategory, status, searchText, vendorId } = filter;
+  const startIso = startDate?.toISOString() ?? '';
+  const endIso = endDate?.toISOString() ?? '';
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const s = await expenseStatsService.compute(filter);
+      const stableFilter: ExpenseFilter = {
+        startDate: startIso ? new Date(startIso) : undefined,
+        endDate: endIso ? new Date(endIso) : undefined,
+        mainCategory,
+        status,
+        searchText,
+        vendorId,
+      };
+      const s = await expenseStatsService.compute(stableFilter);
       setStats(s);
     } finally {
       setLoading(false);
     }
-  }, [
-    filter?.startDate?.toISOString(),
-    filter?.endDate?.toISOString(),
-    filter?.mainCategory,
-    filter?.status,
-  ]);
+  }, [startIso, endIso, mainCategory, status, searchText, vendorId]);
 
   useEffect(() => {
     refresh();

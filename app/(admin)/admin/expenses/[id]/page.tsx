@@ -87,7 +87,7 @@ function SKUCombobox({ currentSkuId, currentLabel, skus, onSelect, onClearToNew 
             </div>
           ))}
           {filtered.length === 0 && search && (
-            <div className="px-2 py-2 text-[10px] text-gray-400 text-center">No SKUs match "{search}"</div>
+            <div className="px-2 py-2 text-[10px] text-gray-400 text-center">No SKUs match {"\""}{search}{"\""}</div>
           )}
         </div>
       )}
@@ -316,6 +316,8 @@ export default function ExpenseDetailPage({ params }: Props) {
           });
         } else {
           await expenseLineService.update(line.id, {
+            skuId: line.skuId,
+            skuCode: line.skuCode,
             skuName: line.skuName,
             mainCategory: line.mainCategory,
             subCategory: line.subCategory,
@@ -328,6 +330,10 @@ export default function ExpenseDetailPage({ params }: Props) {
             subtotal: line.subtotal,
             discount: line.discount,
             finalAmount: line.finalAmount,
+            isNewSku: line.isNewSku,
+            documentDate: editDoc.documentDate instanceof Date ? editDoc.documentDate : document.documentDate,
+            vendorName: editDoc.vendorName ?? document.vendorName,
+            place: editDoc.place ?? document.place,
           });
         }
       }
@@ -383,6 +389,7 @@ export default function ExpenseDetailPage({ params }: Props) {
       body: JSON.stringify({
         startDate: document.documentDate.toISOString(),
         endDate: document.documentDate.toISOString(),
+        documentId: params.id,
       }),
     });
     if (!res.ok) return;

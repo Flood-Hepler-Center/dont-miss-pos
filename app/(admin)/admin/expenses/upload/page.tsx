@@ -83,7 +83,7 @@ function renderStepSummary(step: AIPipelineStep, result: unknown): string {
     if (step === 'ocr_extractor') { const items = (r.line_items as unknown[]) ?? []; return `✓ ${items.length} items — ${String((r.vendor as Record<string, unknown>)?.name ?? 'unknown')} — ฿${Number(r.total).toLocaleString()}`; }
     if (step === 'sku_matcher') { const m = (r.matches as unknown[]) ?? []; const n = (r.matches as Array<Record<string, unknown>>).filter(x => x.is_new_sku).length; return `✓ ${m.length} matched — ${n} new SKU${n !== 1 ? 's' : ''}`; }
     if (step === 'expense_finalizer') { const l = (r.lines as unknown[]) ?? []; return `✓ ${l.length} lines — ฿${Number(r.total).toLocaleString()} — ${Math.round(Number(r.confidence_score) * 100)}%`; }
-  } catch (_) { /* */ }
+  } catch { /* */ }
   return 'Completed';
 }
 
@@ -224,7 +224,7 @@ export default function ExpenseUploadPage() {
     setEditableLines([]);
     setSavedId(null);
     setManualEditMode(false);
-    try { await startPipeline(file); } catch (_) { /* handled by hook */ }
+    try { await startPipeline(file); } catch { /* handled by hook */ }
   }, [startPipeline]);
 
   // ─── Parallel multi-file: fire ALL pipelines simultaneously ───────────
@@ -537,7 +537,7 @@ export default function ExpenseUploadPage() {
   ).filter((l: EditableLine) => !l._deleted);
 
   // Active file's pipeline steps (for multi mode display)
-  const activeSteps = activeMultiFile?.pipelineSteps ?? job?.steps ?? [];
+  // const activeSteps = activeMultiFile?.pipelineSteps ?? job?.steps ?? [];
 
   // ─── Render ────────────────────────────────────────────────────────────
 

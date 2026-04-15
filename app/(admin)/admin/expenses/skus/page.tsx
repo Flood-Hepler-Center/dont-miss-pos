@@ -165,7 +165,7 @@ export default function SKUCatalogPage() {
       if (!res.ok) throw new Error('Sync failed');
       const data = await res.json();
       setSyncResult(data);
-    } catch (err) {
+    } catch {
       alert('Error during global sync. Please try again.');
       setSyncModalOpen(false);
     } finally {
@@ -493,8 +493,8 @@ export default function SKUCatalogPage() {
                   <ul className="text-[10px] space-y-2 text-gray-600 list-disc pl-4 font-mono">
                     <li>Scans every confirmed expense document on record.</li>
                     <li>Checks every individual expense line unit definition.</li>
-                    <li><strong className="text-black">If an historical line has a mismatched Unit or Factor, it modifies that specific line silently to match the master SKU's current settings.</strong></li>
-                    <li>Recalculates the "TOTAL PURCHASED" and "AVG COST/BASE" entirely from scratch for every unit.</li>
+                    <li><strong className="text-black">If an historical line has a mismatched Unit or Factor, it modifies that specific line silently to match the master SKU{"'"}s current settings.</strong></li>
+                    <li>Recalculates the {"\""}TOTAL PURCHASED{"\""} and {"\""}AVG COST/BASE{"\""} entirely from scratch for every unit.</li>
                   </ul>
                   
                   <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 flex gap-2">

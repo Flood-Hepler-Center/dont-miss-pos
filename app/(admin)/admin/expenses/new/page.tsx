@@ -4,6 +4,8 @@ import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 import { Select } from 'antd';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '@/lib/firebase/config';
 import { expenseDocumentService, expenseLineService, expenseStatsService } from '@/lib/services/expense.service';
 import { useExpenseSKUs, useExpenseVendors } from '@/lib/hooks/useExpenses';
 import type { ExpenseSubCategory, PurchaseUnit, BaseUnit, ExpenseSKU } from '@/types/expense';
@@ -97,6 +99,8 @@ export default function NewExpensePage() {
   const [place, setPlace] = useState('');
   const [documentDate, setDocumentDate] = useState(new Date().toISOString().split('T')[0]);
   const [receiptNumber, setReceiptNumber] = useState('');
+  const [receiptImageUrl, setReceiptImageUrl] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [taxAmount, setTaxAmount] = useState(0);
   const [serviceCharge, setServiceCharge] = useState(0);
   const [notes, setNotes] = useState('');
@@ -128,6 +132,24 @@ export default function NewExpensePage() {
     });
   }, [skus]);
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingImage(true);
+    try {
+      const fileRef = ref(storage, `expenses/manual/${Date.now()}_${file.name}`);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+      setReceiptImageUrl(url);
+    } catch (err) {
+      console.error('Image upload failed', err);
+      alert('Failed to upload receipt image.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   const handleSave = useCallback(async (saveStatus: 'draft' | 'confirmed') => {
     if (!vendorName) { alert('Vendor name is required'); return; }
     if (lines.some((l) => !l.skuName)) { alert('All lines need an item name'); return; }
@@ -140,6 +162,7 @@ export default function NewExpensePage() {
         place: place || vendorName,
         source: 'manual',
         receiptNumber: receiptNumber || undefined,
+        receiptImageUrl: receiptImageUrl || undefined,
         subtotal,
         taxAmount,
         serviceCharge,
@@ -186,7 +209,7 @@ export default function NewExpensePage() {
     } finally {
       setSaving(false);
     }
-  }, [vendorName, place, documentDate, receiptNumber, taxAmount, serviceCharge, total, subtotal, lines, router]);
+  }, [vendorName, place, documentDate, receiptNumber, receiptImageUrl, taxAmount, serviceCharge, total, subtotal, lines, router]);
 
   return (
     <div className="min-h-screen bg-white font-mono">
@@ -244,6 +267,20 @@ export default function NewExpensePage() {
                 placeholder="Optional"
                 className="w-full border-2 border-black px-3 py-2 text-sm font-mono"
               />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-gray-500 block mb-1">RECEIPT IMAGE</label>
+              {receiptImageUrl ? (
+                <div className="flex items-center gap-2 border-2 border-black px-3 py-1.5 bg-gray-50">
+                  <span className="text-green-600 truncate flex-1 text-xs font-bold">Uploaded</span>
+                  <button onClick={() => setReceiptImageUrl('')} className="p-1 text-red-500 hover:bg-red-100"><Trash2 size={14}/></button>
+                </div>
+              ) : (
+                <label className={`block w-full border-2 border-black border-dashed px-3 py-1.5 text-center cursor-pointer hover:bg-gray-50 transition-colors ${uploadingImage ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <span className="text-xs font-bold text-gray-600">{uploadingImage ? 'UPLOADING...' : 'SUBMIT RECPT'}</span>
+                  <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                </label>
+              )}
             </div>
             <div>
               <label className="text-[10px] font-bold text-gray-500 block mb-1">TAX (฿)</label>

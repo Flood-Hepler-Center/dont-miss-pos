@@ -46,7 +46,8 @@ export default function ExpensesPage() {
   }), [dateRange, categoryFilter, statusFilter, searchText]);
 
   const { documents, loading, confirmDocument, deleteDocument } = useExpenseDocuments(filter);
-  const { stats } = useExpenseStats({ startDate: dateRange.start, endDate: dateRange.end });
+  const statsFilter = useMemo(() => ({ startDate: dateRange.start, endDate: dateRange.end }), [dateRange.start, dateRange.end]);
+  const { stats } = useExpenseStats(statsFilter);
 
   // Exclude cancelled documents from standard display lists
   const displayDocs = useMemo(() => documents.filter((d) => d.status !== 'cancelled'), [documents]);

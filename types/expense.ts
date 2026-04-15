@@ -331,6 +331,7 @@ export type ExpenseExportFilter = {
   vendorId?: string;
   skuId?: string;
   status?: ExpenseDocumentStatus;
+  documentId?: string;
 };
 
 export type ExpenseExportRow = {
@@ -367,6 +368,7 @@ export type ExpenseFilter = {
   skuId?: string;
   status?: ExpenseDocumentStatus;
   searchText?: string;
+  documentId?: string;
 };
 
 export type ExpenseStats = {

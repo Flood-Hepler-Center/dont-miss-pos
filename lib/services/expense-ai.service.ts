@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Expense AI Pipeline Service
  *
@@ -18,6 +19,7 @@ import {
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
+// import { generateObject } from 'ai';
 import { db } from '@/lib/firebase/config';
 import Fuse from 'fuse.js';
 import type {
@@ -84,7 +86,7 @@ function cleanJsonResponse(content: string): string {
 
 function normalizeDescription(description: string): string {
   // Remove quantity patterns: "2x", "2 kg", "×3", "x2", "2 PACK", "3 bottles", etc.
-  let normalized = description
+  const normalized = description
     // Remove "x2", "×3", "2x" patterns
     .replace(/\s*[×x]\s*\d+/gi, '')
     .replace(/\s*\d+\s*[×x]/gi, '')
@@ -382,7 +384,7 @@ Respond with JSON matching this exact schema:
     try {
       result = JSON.parse(repairedContent) as AIOCRResult;
       console.log('? [OCR EXTRACTOR] Successfully repaired truncated JSON');
-    } catch (repairError) {
+    } catch {
       console.error('\n? [OCR EXTRACTOR] JSON Parse Error!');
       console.error('Raw response (first 2000 chars):');
       console.error(content.substring(0, 2000));
