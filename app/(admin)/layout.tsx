@@ -223,6 +223,29 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               RECIPES
             </button>
 
+            {/* ── EXPENSE MANAGEMENT ── */}
+            <div className="flex items-center px-2 text-[10px] font-bold text-gray-400 flex-shrink-0 border-r-2 border-black bg-gray-50 select-none">
+              EXPENSE
+            </div>
+
+            <button
+              onClick={() => router.push('/admin/expenses')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname.startsWith('/admin/expenses') && !pathname.startsWith('/admin/expenses/skus') ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              EXPENSES
+            </button>
+
+            <button
+              onClick={() => router.push('/admin/expenses/skus')}
+              className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${
+                pathname.startsWith('/admin/expenses/skus') ? 'bg-black text-white' : 'bg-white text-black'
+              }`}
+            >
+              SKU CATALOG
+            </button>
+
             <button
               onClick={() => router.push('/admin/settings/general')}
               className={`px-4 md:px-6 py-3 text-xs md:text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 ${

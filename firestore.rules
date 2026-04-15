@@ -102,5 +102,26 @@ service cloud.firestore {
       allow read: if true;
       allow write: if true; // Staff/admin can create, update, delete bookings
     }
+
+    // Expense Management Collections
+    match /expense_documents/{docId} {
+      allow read, write: if true; // Admin manage expense documents
+    }
+
+    match /expense_lines/{lineId} {
+      allow read, write: if true; // Admin manage expense line items
+    }
+
+    match /expense_skus/{skuId} {
+      allow read, write: if true; // Admin manage SKU catalog
+    }
+
+    match /expense_vendors/{vendorId} {
+      allow read, write: if true; // Admin manage vendors
+    }
+
+    match /expense_ai_jobs/{jobId} {
+      allow read, write: if true; // Admin manage AI pipeline jobs
+    }
   }
 }

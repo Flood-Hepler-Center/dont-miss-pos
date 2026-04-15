@@ -1,7 +1,7 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    
+
     // Menu item images: Public read, admin write
     match /menu-items/{itemId}/{fileName} {
       allow read: if true; // Public read for customer menu
@@ -9,14 +9,21 @@ service firebase.storage {
                       request.resource.size < 2 * 1024 * 1024 && // Max 2MB
                       request.resource.contentType.matches('image/.*'); // Images only
     }
-    
+
     // Receipt logo: Public read, admin write
     match /receipts/logo.png {
       allow read: if true;
       allow write: if request.auth != null &&
                       request.resource.size < 500 * 1024; // Max 500KB
     }
-    
+
+    // Expense receipts: Public read for AI processing, validated write
+    match /expense_receipts/{fileName} {
+      allow read: if true; // Public read needed for server + OpenRouter AI
+      allow write: if request.resource.size < 10 * 1024 * 1024 && // Max 10MB
+                      request.resource.contentType.matches('image/.*'); // Images only
+    }
+
     // Temporary uploads: Authenticated write, short-lived
     match /temp/{fileName} {
       allow read, write: if request.auth != null &&
