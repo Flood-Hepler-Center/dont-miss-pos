@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
@@ -215,6 +216,7 @@ export default function ExpenseUploadPage() {
 
   // Firestore unsub refs for parallel multi-file subscriptions
   const multiSubsRef = useRef<Map<string, () => void>>(new Map());
+  const multiProcessingRef = useRef<Map<string, string>>(new Map());
 
   // ─── Single-file handler ───────────────────────────────────────────────
 
@@ -274,8 +276,10 @@ export default function ExpenseUploadPage() {
       if (!mf.jobId) continue;
       if (multiSubsRef.current.has(mf.jobId)) continue;
 
+      const currentJobId = mf.jobId;
       const localId = mf.id;
-      const unsub = onSnapshot(doc(db, 'expense_ai_jobs', mf.jobId), (snap) => {
+      
+      const unsub = onSnapshot(doc(db, 'expense_ai_jobs', currentJobId), (snap) => {
         if (!snap.exists()) return;
         const data = snap.data() as {
           overallStatus: string;
@@ -283,6 +287,36 @@ export default function ExpenseUploadPage() {
           steps?: AIPipelineStepResult[];
           errorMessage?: string;
         };
+
+        // --- PARALLEL NUDGE LOGIC ---
+        if (data.overallStatus === 'running' || data.overallStatus === 'pending') {
+          const pendingSteps = data.steps?.filter(s => s.status === 'pending') || [];
+          
+          for (const nextS of pendingSteps) {
+            // Steps 1, 2, 3 are independent
+            const isIndependent = nextS.stepNumber <= 3;
+            const allPrereqsDone = data.steps?.filter(s => s.stepNumber < nextS.stepNumber).every(s => s.status === 'done');
+            
+            const isValidToStart = isIndependent || allPrereqsDone;
+
+            if (isValidToStart && multiProcessingRef.current.get(currentJobId) !== nextS.step) {
+              multiProcessingRef.current.set(currentJobId, nextS.step);
+              console.log(`🧠 [Multi] Nudging ${currentJobId} step ${nextS.stepNumber}: ${nextS.step}`);
+              
+              fetch(`/api/expenses/ai/${currentJobId}/step`, { method: 'POST' })
+                .then(res => { 
+                  if (!res.ok) throw new Error(); 
+                  console.log(`✅ [Multi] Step ${nextS.step} triggered for ${currentJobId}`);
+                })
+                .catch(() => { 
+                  console.error(`❌ [Multi] Nudge failed for ${currentJobId} ${nextS.step}`);
+                  multiProcessingRef.current.delete(currentJobId); 
+                });
+            }
+          }
+        } else if (data.overallStatus === 'completed' || data.overallStatus === 'needs_review' || data.overallStatus === 'failed') {
+          multiProcessingRef.current.delete(currentJobId);
+        }
 
         setMultiFiles(prev => prev.map(f => {
           if (f.id !== localId) return f;

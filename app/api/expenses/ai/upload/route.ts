@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase/config';
 import { expenseAIService } from '@/lib/services/expense-ai.service';
-import { expenseSKUService } from '@/lib/services/expense.service';
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,19 +30,9 @@ export async function POST(req: NextRequest) {
     const imageUrl = await getDownloadURL(storageRef);
 
     const jobId = await expenseAIService.createJob(imageUrl, imagePath);
-
-    const skus = await expenseSKUService.getAll();
     
-    // 1. Immediately mark the job as 'running' so the UI progress bar jumps from 0% instantly
-    await expenseAIService.updateJobStatus(jobId, 'running');
-
-    // 2. Start the heavy pipeline in the background - DO NOT AWAIT it here
-    // This prevents the 504 Gateway Timeout on Vercel
-    expenseAIService.runPipeline(jobId, skus).catch((err) => {
-      console.error(`AI background pipeline failed for job ${jobId}:`, err);
-    });
-
-    // 3. Return the jobId immediately so the frontend can start its Firestore subscription/polling
+    // Return early - the Client (browser) will now drive the execution of 
+    // each AI step sequentially via /api/expenses/ai/[jobId]/step
     return NextResponse.json({ jobId, imageUrl }, { status: 201 });
   } catch (error) {
     console.error('POST /api/expenses/ai/upload error:', error);
@@ -51,5 +40,5 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Keep a reasonable timeout for the synchronous parts (upload + status update)
-export const maxDuration = 30; 
+// Low timeout is fine now as we only do basic upload/db write here
+export const maxDuration = 10; 

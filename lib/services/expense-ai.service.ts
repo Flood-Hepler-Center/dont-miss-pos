@@ -38,7 +38,7 @@ const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 
 const MODELS = {
   FAST_VISION: 'google/gemini-2.0-flash-001', // Fast vision for validation
-  PRECISE_VISION: 'google/gemini-3.1-pro-preview', // Most reliable for JSON + Thai OCR
+  PRECISE_VISION: 'google/gemini-3-flash-preview', // Most reliable for JSON + Thai OCR
   SKU_MATCHER: 'openai/gpt-4o-mini', // Good reasoning at low cost
   FINALIZER: 'anthropic/claude-3.5-haiku', // Excellent structured output
 } as const;
@@ -62,11 +62,11 @@ const STEP_NUMBERS: Record<AIPipelineStep, 1 | 2 | 3 | 4 | 5> = {
 type OpenRouterMessage = {
   role: 'system' | 'user' | 'assistant';
   content:
-    | string
-    | Array<
-        | { type: 'text'; text: string }
-        | { type: 'image_url'; image_url: { url: string } }
-      >;
+  | string
+  | Array<
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; image_url: { url: string } }
+  >;
 };
 
 // ─── JSON Cleanup Helper ──────────────────────────────────────────────────────
@@ -183,7 +183,7 @@ async function callOpenRouter(
 
 const JOBS_COL = 'expense_ai_jobs';
 
-async function updateJobStep(
+export async function updateJobStep(
   jobId: string,
   step: AIPipelineStep,
   update: Partial<AIPipelineStepResult>
@@ -204,7 +204,7 @@ async function updateJobStep(
 
 // ─── Step 1: Bill Validator ───────────────────────────────────────────────────
 
-async function runBillValidator(
+export async function runBillValidator(
   jobId: string,
   imageUrl: string
 ): Promise<AIBillValidatorResult> {
@@ -254,7 +254,7 @@ Respond with JSON matching this exact schema:
 
 // ─── Step 2: Quality Assessor ─────────────────────────────────────────────────
 
-async function runQualityAssessor(
+export async function runQualityAssessor(
   jobId: string,
   imageUrl: string
 ): Promise<AIQualityResult> {
@@ -303,7 +303,7 @@ Respond with JSON matching this exact schema:
 
 // ─── Step 3: OCR Extractor ────────────────────────────────────────────────────
 
-async function runOCRExtractor(
+export async function runOCRExtractor(
   jobId: string,
   imageUrl: string
 ): Promise<AIOCRResult> {
@@ -371,7 +371,7 @@ Respond with JSON matching this exact schema:
   ];
 
   const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.PRECISE_VISION, messages);
-  
+
   // Clean and parse JSON with error handling
   const cleanedContent = cleanJsonResponse(content);
   let result: AIOCRResult;
@@ -396,7 +396,7 @@ Respond with JSON matching this exact schema:
       throw new Error(`OCR returned invalid JSON: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
-  
+
   // ━━━ DETAILED LOGGING FOR DEBUGGING ━━━
   console.log('\n🔍 [OCR EXTRACTOR] Full Results:');
   console.log('📋 Vendor:', result.vendor.name);
@@ -409,7 +409,7 @@ Respond with JSON matching this exact schema:
   });
   console.log('💰 Total: ฿' + result.total);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-  
+
   const completedAt = new Date();
   await updateJobStep(jobId, 'ocr_extractor', {
     status: 'done',
@@ -424,7 +424,7 @@ Respond with JSON matching this exact schema:
 
 // --- Step 4: SKU Matcher ---
 
-async function runSKUMatcher(
+export async function runSKUMatcher(
   jobId: string,
   ocrResult: AIOCRResult,
   existingSKUs: ExpenseSKU[]
@@ -483,12 +483,12 @@ async function runSKUMatcher(
 
   // --- FUZZY MATCHING WITH DETAILED LOGGING ---
   console.log('\n [SKU MATCHER] Starting fuzzy matching...\n');
-  
+
   const relevantSKUs: ExpenseSKU[] = [];
   for (const item of ocrResult.line_items) {
     console.log(` Searching for: "${item.description}"`);
     const results = fuse.search(item.description, { limit: 3 });
-    
+
     if (results.length > 0) {
       console.log('   Top 3 fuzzy matches:');
       results.forEach((r, idx) => {
@@ -499,14 +499,14 @@ async function runSKUMatcher(
       console.log('    No fuzzy matches found!');
     }
     console.log('');
-    
+
     for (const r of results) {
       if (!relevantSKUs.find((s) => s.id === r.item.id)) {
         relevantSKUs.push(r.item);
       }
     }
   }
-  
+
   console.log(` Found ${relevantSKUs.length} relevant SKUs for AI matching`);
   console.log('---\n');
 
@@ -637,14 +637,14 @@ Respond with JSON:
       }
     }
   }
-  
+
   // --- LOG AI SKU MATCHING DECISIONS ---
   console.log('\n [SKU MATCHER] AI Matching Results:\n');
   result.matches.forEach((match, idx) => {
     const ocrItem = ocrResult.line_items[match.line_item_index];
     const status = match.is_new_sku ? ' NEW SKU' : ' MATCHED';
     const confidence = (match.match_confidence * 100).toFixed(0);
-    
+
     console.log(`${idx + 1}. ${status} - ${confidence}% confident`);
     console.log(`   OCR: "${ocrItem.description}"`);
     if (match.matched_sku_id) {
@@ -657,7 +657,7 @@ Respond with JSON:
     console.log('');
   });
   console.log('---\n');
-  
+
   const completedAt = new Date();
   await updateJobStep(jobId, 'sku_matcher', {
     status: 'done',
@@ -672,7 +672,7 @@ Respond with JSON:
 
 // ─── Step 5: Expense Finalizer ────────────────────────────────────────────────
 
-async function runExpenseFinalizer(
+export async function runExpenseFinalizer(
   jobId: string,
   ocrResult: AIOCRResult,
   skuMatches: AISKUMatcherResult,
@@ -852,11 +852,124 @@ export const expenseAIService = {
     } as AIExpenseJob;
   },
 
-  async updateJobStatus(jobId: string, status: string): Promise<void> {
-    await updateDoc(doc(db, JOBS_COL, jobId), {
-      overallStatus: status,
-      updatedAt: serverTimestamp(),
+  async runStep(jobId: string, existingSKUs: ExpenseSKU[]): Promise<{ status: string; currentStep: AIPipelineStep | null }> {
+    const jobRef = doc(db, JOBS_COL, jobId);
+    const snap = await getDoc(jobRef);
+    if (!snap.exists()) throw new Error('Job not found');
+
+    const data = snap.data();
+    const steps = (data.steps as AIPipelineStepResult[]) ?? [];
+    const imageUrl = data.imageUrl as string;
+
+    // Determine the first pending step that is READY to run
+    // Rule: Steps 1, 2, 3 can run anytime they are pending
+    // Rule: Step 4, 5 need all previous steps to be 'done'
+    const nextStepIdx = steps.findIndex(s => {
+      if (s.status !== 'pending') return false;
+      if (s.stepNumber <= 3) return true;
+      return steps.filter(prev => prev.stepNumber < s.stepNumber).every(prev => prev.status === 'done');
     });
+
+    if (nextStepIdx === -1) {
+      if (data.overallStatus === 'running' || data.overallStatus === 'pending') {
+        // All steps done, finalize status if not already
+        const lastStepResult = steps.find(s => s.step === 'expense_finalizer')?.result as AIExpenseFinalizerResult | undefined;
+        if (lastStepResult) {
+          const finalStatus = lastStepResult.requires_review ? 'needs_review' : 'completed';
+          await updateDoc(jobRef, { overallStatus: finalStatus, updatedAt: serverTimestamp() });
+        }
+      }
+      return { status: data.overallStatus, currentStep: null };
+    }
+
+    const nextStep = steps[nextStepIdx].step;
+
+    // Auto-transition to 'running' if this is the first step trigger
+    if (data.overallStatus === 'pending') {
+      await updateDoc(jobRef, { overallStatus: 'running', updatedAt: serverTimestamp() });
+    }
+
+    // CRITICAL: Mark this step as 'running' immediately so other parallel triggers don't pick it
+    await updateJobStep(jobId, nextStep, {
+      status: 'running',
+      startedAt: new Date()
+    });
+
+    console.log(`\n⏳ [AI STEP] Executing "${nextStep}" for job: ${jobId}`);
+
+    try {
+      if (nextStep === 'bill_validator') {
+        const res = await runBillValidator(jobId, imageUrl);
+        if (!res.is_valid_document) {
+          await updateDoc(jobRef, {
+            overallStatus: 'failed',
+            errorMessage: `Not a valid document: ${res.rejection_reason ?? res.document_type}`,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      } else if (nextStep === 'quality_assessor') {
+        const res = await runQualityAssessor(jobId, imageUrl);
+        if (res.recommended_action === 'request_better_image') {
+          await updateDoc(jobRef, {
+            overallStatus: 'needs_review',
+            errorMessage: `Image quality too poor: ${res.issues.join(', ')}`,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      } else if (nextStep === 'ocr_extractor') {
+        await runOCRExtractor(jobId, imageUrl);
+      } else if (nextStep === 'sku_matcher') {
+        // Step 4 needs step 3 result. Force re-fetch snapshot to ensure we have Step 3 data!
+        const freshSnap = await getDoc(jobRef);
+        const freshSteps = (freshSnap.data()?.steps as AIPipelineStepResult[]) ?? [];
+        const ocrStep = freshSteps.find(s => s.step === 'ocr_extractor');
+
+        if (!ocrStep || ocrStep.status !== 'done') {
+          console.error('[runStep] OCR result still missing in Firestore even after re-fetch', { jobId });
+          throw new Error('OCR result missing');
+        }
+        await runSKUMatcher(jobId, ocrStep.result as AIOCRResult, existingSKUs);
+      } else if (nextStep === 'expense_finalizer') {
+        // Step 5 needs step 3 & 4 results. Force re-fetch.
+        const freshSnap = await getDoc(jobRef);
+        const freshSteps = (freshSnap.data()?.steps as AIPipelineStepResult[]) ?? [];
+        const ocrResult = freshSteps.find(s => s.step === 'ocr_extractor')?.result;
+        const matcherResult = freshSteps.find(s => s.step === 'sku_matcher')?.result;
+
+        if (!ocrResult || !matcherResult) throw new Error('Step 3 or 4 results missing');
+        const finalResult = await runExpenseFinalizer(
+          jobId, 
+          ocrResult as AIOCRResult, 
+          matcherResult as AISKUMatcherResult, 
+          existingSKUs
+        );
+
+        const finalStatus = finalResult.requires_review ? 'needs_review' : 'completed';
+        const totalDuration = freshSteps.reduce((s, st) => s + (st.durationMs ?? 0), 0);
+
+        await updateDoc(jobRef, {
+          overallStatus: finalStatus,
+          finalResult: finalResult,
+          totalDurationMs: totalDuration,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      const updatedSnap = await getDoc(jobRef);
+      const updatedData = updatedSnap.data()!;
+      return {
+        status: updatedData.overallStatus,
+        currentStep: (updatedData.steps as AIPipelineStepResult[]).find(s => s.status === 'pending')?.step ?? null
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Step execution failed';
+      await updateDoc(jobRef, {
+        overallStatus: 'failed',
+        errorMessage: msg,
+        updatedAt: serverTimestamp(),
+      });
+      throw error;
+    }
   },
 
   async runPipeline(jobId: string, existingSKUs: ExpenseSKU[]): Promise<AIExpenseFinalizerResult> {

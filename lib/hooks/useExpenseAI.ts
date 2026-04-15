@@ -1,9 +1,10 @@
+/* eslint-disable no-console */
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import type { AIExpenseJob, AIExpenseFinalizerResult } from '@/types/expense';
+import type { AIExpenseJob, AIExpenseFinalizerResult, AIBillValidatorResult } from '@/types/expense';
 
 type UploadState = 'idle' | 'uploading' | 'processing' | 'review' | 'done' | 'error';
 
@@ -13,6 +14,7 @@ export function useExpenseAI() {
   const [uploadState, setUploadState] = useState<UploadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [finalResult, setFinalResult] = useState<AIExpenseFinalizerResult | null>(null);
+  const processingRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
@@ -20,17 +22,60 @@ export function useExpenseAI() {
       if (!snap.exists()) return;
       const data = snap.data() as AIExpenseJob;
       setJob({ ...data, id: snap.id });
+      
       if (data.overallStatus === 'completed') {
         setUploadState('done');
         setFinalResult(data.finalResult ?? null);
+        processingRef.current = null;
       } else if (data.overallStatus === 'needs_review') {
         setUploadState('review');
         setFinalResult(data.finalResult ?? null);
+        processingRef.current = null;
       } else if (data.overallStatus === 'failed') {
         setUploadState('error');
         setError(data.errorMessage ?? 'Pipeline failed');
-      } else if (data.overallStatus === 'running') {
+        processingRef.current = null;
+      } else if (data.overallStatus === 'running' || data.overallStatus === 'pending') {
         setUploadState('processing');
+        
+        // --- PARALLEL NUDGE LOGIC ---
+        const pendingSteps = data.steps?.filter(s => s.status === 'pending') || [];
+        
+        for (const nextStep of pendingSteps) {
+          // Rule 1: Step 1, 2, and 3 are independent and can run in parallel
+          const isIndependent = nextStep.stepNumber <= 3;
+          
+          // Rule 2: Step 4 and 5 have dependencies
+          const allPrereqsDone = data.steps?.filter(s => s.stepNumber < nextStep.stepNumber).every(s => s.status === 'done');
+          
+          // Rule 3: Validation Check
+          const isValidToStart = isIndependent || (allPrereqsDone && (
+            nextStep.step === 'sku_matcher' ? (
+              // Ensure Step 1 didn't fail and Step 3 is truly done
+              (data.steps?.find(s => s.step === 'bill_validator')?.result as AIBillValidatorResult)?.is_valid_document !== false
+            ) : true
+          ));
+
+          if (isValidToStart && processingRef.current !== nextStep.step) {
+            // Check if we are already "nudging" this specific step in this specific session
+            // (We use a cache to avoid multiple triggers for the same step)
+            processingRef.current = nextStep.step;
+            console.log(`🧠 [AI] Nudging ${nextStep.stepNumber}/5: ${nextStep.step}`);
+            
+            fetch(`/api/expenses/ai/${jobId}/step`, { method: 'POST' })
+              .then(async res => {
+                if (!res.ok) {
+                  const errData = await res.json().catch(() => ({}));
+                  throw new Error(errData.error ?? 'Step failed');
+                }
+                console.log(`✅ [AI] Step ${nextStep.step} triggered`);
+              })
+              .catch(err => {
+                console.error(`❌ [AI] Nudge failed for ${nextStep.step}:`, err);
+                processingRef.current = null; 
+              });
+          }
+        }
       }
     });
     return () => unsub();
