@@ -816,8 +816,6 @@ Respond with JSON:
   return result;
 }
 
-// ─── Main Pipeline Orchestrator ───────────────────────────────────────────────
-
 export const expenseAIService = {
   async createJob(imageUrl: string, imagePath: string): Promise<string> {
     const ref = doc(collection(db, JOBS_COL));
@@ -864,10 +862,15 @@ export const expenseAIService = {
 
     await updateDoc(jobRef, { overallStatus: 'running', updatedAt: serverTimestamp() });
 
+    console.log(`\n🚀 [AI PIPELINE] Starting for job: ${jobId}`);
+    const pipeStart = Date.now();
+
     try {
-      // ── Steps 1 → 2 → 3 → 4 → 5 (sequential within a single image) ─────
+      // ── Step 1: Validator ─────
+      console.log('  ⏳ [Step 1/5] Running Bill Validator...');
       const step1 = await runBillValidator(jobId, imageUrl);
       if (!step1.is_valid_document) {
+        console.warn('  ❌ [Step 1] REJECTED: Not a valid document.');
         await updateDoc(jobRef, {
           overallStatus: 'failed',
           errorMessage: `Not a valid document: ${step1.rejection_reason ?? step1.document_type}`,
@@ -875,9 +878,13 @@ export const expenseAIService = {
         });
         throw new Error(`Not a valid expense document: ${step1.rejection_reason}`);
       }
+      console.log('  ✅ [Step 1] Document validated.');
 
+      // ── Step 2: Quality ─────
+      console.log('  ⏳ [Step 2/5] Running Quality Assessor...');
       const step2 = await runQualityAssessor(jobId, imageUrl);
       if (step2.recommended_action === 'request_better_image') {
+        console.warn('  ❌ [Step 2] REJECTED: Poor image quality.');
         await updateDoc(jobRef, {
           overallStatus: 'needs_review',
           errorMessage: `Image quality too poor: ${step2.issues.join(', ')}`,
@@ -885,22 +892,34 @@ export const expenseAIService = {
         });
         throw new Error(`Image quality poor: ${step2.issues.join(', ')}`);
       }
+      console.log('  ✅ [Step 2] Quality acceptable.');
 
+      // ── Step 3: OCR ─────
+      console.log('  ⏳ [Step 3/5] Running OCR Extractor (Pro Model)...');
       const step3 = await runOCRExtractor(jobId, imageUrl);
+      console.log(`  ✅ [Step 3] Extracted ${step3.line_items.length} raw items.`);
+
+      // ── Step 4: SKU Matching ─────
+      console.log('  ⏳ [Step 4/5] Matching items to SKUs...');
       const step4 = await runSKUMatcher(jobId, step3, existingSKUs);
+      console.log('  ✅ [Step 4] SKU matching complete.');
+
+      // ── Step 5: Finalizer ─────
+      console.log('  ⏳ [Step 5/5] Building final expense record...');
       const step5 = await runExpenseFinalizer(jobId, step3, step4, existingSKUs);
+      console.log('  ✅ [Step 5] Finalization complete.');
 
       const finalStatus = step5.requires_review ? 'needs_review' : 'completed';
+      const totalDuration = Date.now() - pipeStart;
+
       await updateDoc(jobRef, {
         overallStatus: finalStatus,
         finalResult: step5,
-        totalDurationMs: snap.data()?.steps?.reduce(
-          (s: number, st: AIPipelineStepResult) => s + (st.durationMs ?? 0),
-          0
-        ) ?? 0,
+        totalDurationMs: totalDuration,
         updatedAt: serverTimestamp(),
       });
 
+      console.log(`\n🎉 [AI PIPELINE] SUCCESS in ${Math.round(totalDuration / 1000)}s - Status: ${finalStatus}\n`);
       return step5;
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Pipeline failed';

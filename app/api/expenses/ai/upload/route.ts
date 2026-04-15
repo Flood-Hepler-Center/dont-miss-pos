@@ -33,9 +33,15 @@ export async function POST(req: NextRequest) {
     const jobId = await expenseAIService.createJob(imageUrl, imagePath);
 
     const skus = await expenseSKUService.getAll();
-    expenseAIService.runPipeline(jobId, skus).catch((err: unknown) => {
-      console.error(`AI pipeline failed for job ${jobId}:`, err);
-    });
+    
+    // Crucially await the pipeline result so the serverless function doesn't terminate prematurely
+    try {
+      await expenseAIService.runPipeline(jobId, skus);
+    } catch (err) {
+      console.error(`AI pipeline execution error for job ${jobId}:`, err);
+      // We don't return 500 here because the job document itself will contain the error state 
+      // which the frontend is polling for.
+    }
 
     return NextResponse.json({ jobId, imageUrl }, { status: 201 });
   } catch (error) {
@@ -43,3 +49,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
   }
 }
+
+export const maxDuration = 60; // Allow enough time for complex AI processing on Vercel
