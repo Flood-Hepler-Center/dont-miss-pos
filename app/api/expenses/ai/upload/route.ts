@@ -34,15 +34,16 @@ export async function POST(req: NextRequest) {
 
     const skus = await expenseSKUService.getAll();
     
-    // Crucially await the pipeline result so the serverless function doesn't terminate prematurely
-    try {
-      await expenseAIService.runPipeline(jobId, skus);
-    } catch (err) {
-      console.error(`AI pipeline execution error for job ${jobId}:`, err);
-      // We don't return 500 here because the job document itself will contain the error state 
-      // which the frontend is polling for.
-    }
+    // 1. Immediately mark the job as 'running' so the UI progress bar jumps from 0% instantly
+    await expenseAIService.updateJobStatus(jobId, 'running');
 
+    // 2. Start the heavy pipeline in the background - DO NOT AWAIT it here
+    // This prevents the 504 Gateway Timeout on Vercel
+    expenseAIService.runPipeline(jobId, skus).catch((err) => {
+      console.error(`AI background pipeline failed for job ${jobId}:`, err);
+    });
+
+    // 3. Return the jobId immediately so the frontend can start its Firestore subscription/polling
     return NextResponse.json({ jobId, imageUrl }, { status: 201 });
   } catch (error) {
     console.error('POST /api/expenses/ai/upload error:', error);
@@ -50,4 +51,5 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export const maxDuration = 60; // Allow enough time for complex AI processing on Vercel
+// Keep a reasonable timeout for the synchronous parts (upload + status update)
+export const maxDuration = 30; 

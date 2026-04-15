@@ -852,6 +852,13 @@ export const expenseAIService = {
     } as AIExpenseJob;
   },
 
+  async updateJobStatus(jobId: string, status: string): Promise<void> {
+    await updateDoc(doc(db, JOBS_COL, jobId), {
+      overallStatus: status,
+      updatedAt: serverTimestamp(),
+    });
+  },
+
   async runPipeline(jobId: string, existingSKUs: ExpenseSKU[]): Promise<AIExpenseFinalizerResult> {
     const jobRef = doc(db, JOBS_COL, jobId);
     const snap = await getDoc(jobRef);
@@ -860,9 +867,7 @@ export const expenseAIService = {
     const jobData = snap.data() as { imageUrl: string };
     const imageUrl = jobData.imageUrl;
 
-    await updateDoc(jobRef, { overallStatus: 'running', updatedAt: serverTimestamp() });
-
-    console.log(`\n🚀 [AI PIPELINE] Starting for job: ${jobId}`);
+    console.log(`\n🚀 [AI PIPELINE] Starting background execution for job: ${jobId}`);
     const pipeStart = Date.now();
 
     try {
