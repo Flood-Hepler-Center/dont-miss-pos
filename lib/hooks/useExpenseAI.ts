@@ -14,7 +14,7 @@ export function useExpenseAI() {
   const [uploadState, setUploadState] = useState<UploadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [finalResult, setFinalResult] = useState<AIExpenseFinalizerResult | null>(null);
-  const processingRef = useRef<string | null>(null);
+  const processingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!jobId) return;
@@ -26,15 +26,15 @@ export function useExpenseAI() {
       if (data.overallStatus === 'completed') {
         setUploadState('done');
         setFinalResult(data.finalResult ?? null);
-        processingRef.current = null;
+        processingRef.current.clear();
       } else if (data.overallStatus === 'needs_review') {
         setUploadState('review');
         setFinalResult(data.finalResult ?? null);
-        processingRef.current = null;
+        processingRef.current.clear();
       } else if (data.overallStatus === 'failed') {
         setUploadState('error');
         setError(data.errorMessage ?? 'Pipeline failed');
-        processingRef.current = null;
+        processingRef.current.clear();
       } else if (data.overallStatus === 'running' || data.overallStatus === 'pending') {
         setUploadState('processing');
         
@@ -49,17 +49,17 @@ export function useExpenseAI() {
           const allPrereqsDone = data.steps?.filter(s => s.stepNumber < nextStep.stepNumber).every(s => s.status === 'done');
           
           // Rule 3: Validation Check
+          const validatorRes = data.steps?.find(s => s.step === 'bill_validator')?.result as AIBillValidatorResult | undefined;
+          const isStep1Done = data.steps?.find(s => s.step === 'bill_validator')?.status === 'done';
+          const isStep1Pass = isStep1Done && validatorRes?.is_valid_document !== false;
+
           const isValidToStart = isIndependent || (allPrereqsDone && (
-            nextStep.step === 'sku_matcher' ? (
-              // Ensure Step 1 didn't fail and Step 3 is truly done
-              (data.steps?.find(s => s.step === 'bill_validator')?.result as AIBillValidatorResult)?.is_valid_document !== false
-            ) : true
+            nextStep.step === 'sku_matcher' ? isStep1Pass : true
           ));
 
-          if (isValidToStart && processingRef.current !== nextStep.step) {
-            // Check if we are already "nudging" this specific step in this specific session
-            // (We use a cache to avoid multiple triggers for the same step)
-            processingRef.current = nextStep.step;
+          if (isValidToStart && !processingRef.current.has(nextStep.step)) {
+            // LOCK this individual step
+            processingRef.current.add(nextStep.step);
             console.log(`🧠 [AI] Nudging ${nextStep.stepNumber}/5: ${nextStep.step}`);
             
             fetch(`/api/expenses/ai/${jobId}/step`, { method: 'POST' })
@@ -68,11 +68,15 @@ export function useExpenseAI() {
                   const errData = await res.json().catch(() => ({}));
                   throw new Error(errData.error ?? 'Step failed');
                 }
-                console.log(`✅ [AI] Step ${nextStep.step} triggered`);
+                console.log(`✅ [AI] Step ${nextStep.step} nudge successful`);
+                // Note: We DON'T remove from Set here. 
+                // We Wait for Firestore to say 'done' or 'running', which then naturally 
+                // stops 'pendingSteps' from finding it.
               })
               .catch(err => {
                 console.error(`❌ [AI] Nudge failed for ${nextStep.step}:`, err);
-                processingRef.current = null; 
+                // ONLY unlock on error to allow retry if the job is still pending
+                processingRef.current.delete(nextStep.step); 
               });
           }
         }

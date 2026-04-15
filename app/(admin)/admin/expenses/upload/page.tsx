@@ -216,7 +216,7 @@ export default function ExpenseUploadPage() {
 
   // Firestore unsub refs for parallel multi-file subscriptions
   const multiSubsRef = useRef<Map<string, () => void>>(new Map());
-  const multiProcessingRef = useRef<Map<string, string>>(new Map());
+  const multiProcessingRef = useRef<Map<string, Set<string>>>(new Map());
 
   // ─── Single-file handler ───────────────────────────────────────────────
 
@@ -295,22 +295,30 @@ export default function ExpenseUploadPage() {
           for (const nextS of pendingSteps) {
             // Steps 1, 2, 3 are independent
             const isIndependent = nextS.stepNumber <= 3;
+            
+            // Steps 4, 5 have prereqs
             const allPrereqsDone = data.steps?.filter(s => s.stepNumber < nextS.stepNumber).every(s => s.status === 'done');
             
             const isValidToStart = isIndependent || allPrereqsDone;
 
-            if (isValidToStart && multiProcessingRef.current.get(currentJobId) !== nextS.step) {
-              multiProcessingRef.current.set(currentJobId, nextS.step);
-              console.log(`🧠 [Multi] Nudging ${currentJobId} step ${nextS.stepNumber}: ${nextS.step}`);
+            // Get or create the set for this job
+            if (!multiProcessingRef.current.has(currentJobId)) {
+              multiProcessingRef.current.set(currentJobId, new Set());
+            }
+            const jobSet = multiProcessingRef.current.get(currentJobId)!;
+
+            if (isValidToStart && !jobSet.has(nextS.step)) {
+              jobSet.add(nextS.step);
+              console.log(`🧠 [Multi] Nudging job ${currentJobId} step ${nextS.stepNumber}: ${nextS.step}`);
               
               fetch(`/api/expenses/ai/${currentJobId}/step`, { method: 'POST' })
                 .then(res => { 
                   if (!res.ok) throw new Error(); 
-                  console.log(`✅ [Multi] Step ${nextS.step} triggered for ${currentJobId}`);
+                  console.log(`✅ [Multi] Step ${nextS.step} nudge successful for ${currentJobId}`);
                 })
                 .catch(() => { 
                   console.error(`❌ [Multi] Nudge failed for ${currentJobId} ${nextS.step}`);
-                  multiProcessingRef.current.delete(currentJobId); 
+                  jobSet.delete(nextS.step); 
                 });
             }
           }
