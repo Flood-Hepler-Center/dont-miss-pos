@@ -901,7 +901,7 @@ export const expenseAIService = {
       const stepName = steps[nextStepIdx].step;
       
       // Update overall status to running if needed
-      const updates: Record<string, any> = { currentStep: stepName };
+      const updates: Record<string, string | AIPipelineStepResult[] | null> = { currentStep: stepName };
       if (data.overallStatus === 'pending') updates.overallStatus = 'running';
 
       // Update specific step status

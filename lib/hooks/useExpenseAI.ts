@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import type { AIExpenseJob, AIExpenseFinalizerResult, AIBillValidatorResult } from '@/types/expense';
+import type { AIExpenseJob, AIExpenseFinalizerResult } from '@/types/expense';
 
 type UploadState = 'idle' | 'uploading' | 'processing' | 'review' | 'done' | 'error';
 
