@@ -333,6 +333,20 @@ export async function runOCRExtractor(
       role: 'system',
       content: `You are an expert OCR system specialized in Thai and English receipts/invoices.
 CRITICAL: Preserve text EXACTLY as shown on receipt - DO NOT translate Thai to English.
+CONTEXT: Today is ${new Date().toLocaleDateString('en-GB')}.
+THAI DATE HANDLING:
+- Thai receipts often use the Buddhist Era (BE).
+- If you see a year like 2567, 2568, 2569, it is BE.
+- BE Year - 543 = CE Year (e.g., 2569 BE = 2026 CE).
+- If you see a short year like '69', '68', '67' on a Thai receipt, it likely refers to the last two digits of the BE year (e.g., '69' = 2569 BE = 2026 CE).
+
+MONETARY & TAX HANDLING (THAI CONTEXT):
+- VAT (7%) is called "ภาษีมูลค่าเพิ่ม" or "VAT".
+- Service Charge (usually 10%) is called "ค่าบริการ" or "Service".
+- "Total" is called "ยอดรวม", "ยอดสุทธิ", or "Grand Total".
+- CRITICAL: Grand Total is the final amount paid.
+- FORMULA: Total = Subtotal + Tax + Service Charge.
+- VAT INCLUSIVE: If the receipt says "VAT Included" or "รวมภาษีแล้ว", the Total is the printed total, and you should extract the tax amount if shown, but DO NOT subtract it from the subtotal in a way that changes the Grand Total.
 Extract ALL information precisely maintaining original language (Thai, English, or mixed).
 All monetary values should be numbers (no currency symbols).
 Respond with valid JSON only.`,
@@ -345,6 +359,17 @@ Respond with valid JSON only.`,
           type: 'text',
           text: `Extract all data from this receipt/invoice. Be thorough and precise.
 CRITICAL: Extract item names EXACTLY as shown on receipt - preserve Thai/English/mixed text.
+DATE EXTRACTION:
+- Today's date is ${new Date().toLocaleDateString('en-GB')}.
+- Ensure the extracted "date" is in YYYY-MM-DD format (Christian Era).
+- If the year is missing but a date like "15 Apr" is present, assume the current year (2026).
+- If a Buddhist year is present (e.g., 2569 or 69), convert it to CE (2026).
+
+TAX & TOTAL EXTRACTION:
+- Identify "Subtotal" (before tax), "Tax" (VAT), and "Grand Total".
+- The "total" field MUST be the final amount paid.
+- Check the math: subtotal + tax + service_charge should equal total.
+- If the receipt says "Included VAT", the subtotal is the amount before tax, and total = subtotal + tax.
 
 Examples:
 - Receipt shows: "ปีกกลางไก่ แพ็คถาด" → "description": "ปีกกลางไก่ แพ็คถาด"
@@ -704,12 +729,36 @@ export async function runExpenseFinalizer(
       role: 'system',
       content: `You are an expense management system for a Thai restaurant/bar.
 Build the final structured expense record from extracted and matched data.
+CONTEXT: Today is ${new Date().toLocaleDateString('en-GB')}.
+DATE GUIDELINES:
+- Use today's date (${new Date().toLocaleDateString('en-GB')}) as reference.
+- If OCR extracted 2024 but today is 2026, and the document looks recent, it is likely an extraction error or a missing year. Prefer the current year (2026).
+- Handle Buddhist Era (BE) to Christian Era (CE) conversion: BE - 543 = CE.
+
+MATH & TAX RULES:
+- CRITICAL: Total = Subtotal + Tax + Service Charge.
+- Tax is ALWAYS an addition to the subtotal, NEVER a subtraction from the total.
+- If the OCR result shows a Total that is smaller than the Subtotal, the OCR is wrong.
+- Verify: Sum of line item final_amounts + Tax + Service Charge = Grand Total.
+- If there is a discrepancy, prioritize the "Grand Total" or "ยอดสุทธิ" printed on the receipt and adjust subtotal/tax accordingly.
 Apply unit conversions correctly. All amounts in THB.
 Respond with valid JSON only.`,
     },
     {
       role: 'user',
       content: `Build the final expense record.
+CRITICAL DATE CHECK:
+- Today is ${new Date().toLocaleDateString('en-GB')}.
+- Review the OCR date: ${ocrResult.date}.
+- If the year seems wrong (e.g., 2024 when it's now 2026), correct it to 2026 unless the receipt clearly shows it's an old document.
+- Ensure expense_date is in YYYY-MM-DD (CE) format.
+
+CRITICAL MATH CHECK:
+- Subtotal: ${ocrResult.subtotal}
+- Tax: ${ocrResult.tax ?? 0}
+- Service Charge: ${ocrResult.service_charge ?? 0}
+- Total: ${ocrResult.total}
+- Ensure: Subtotal + Tax + Service Charge = Total. If this doesn't add up, fix the subtotal or tax to match the printed Grand Total.
 
 OCR RESULT:
 ${JSON.stringify(ocrResult, null, 2)}

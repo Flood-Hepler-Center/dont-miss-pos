@@ -279,9 +279,44 @@ export const expenseDocumentService = {
     return onSnapshot(q, (snap) => callback(snap.docs.map((d) => fromFirestoreDoc<ExpenseDocument>(d))));
   },
 
-  subscribeAll(callback: (docs: ExpenseDocument[]) => void): Unsubscribe {
-    const q = query(collection(db, COL.DOCUMENTS), orderBy('documentDate', 'desc'), limit(200));
-    return onSnapshot(q, (snap) => callback(snap.docs.map((d) => fromFirestoreDoc<ExpenseDocument>(d))));
+  subscribeAll(callback: (docs: ExpenseDocument[]) => void, filter?: ExpenseFilter): Unsubscribe {
+    let q = query(collection(db, COL.DOCUMENTS), orderBy('documentDate', 'desc'));
+    
+    if (filter?.status) {
+      q = query(q, where('status', '==', filter.status));
+    }
+    if (filter?.mainCategory) {
+      q = query(q, where('mainCategory', '==', filter.mainCategory));
+    }
+    
+    // Applying a limit to keep performance, but increasing it to 1000 for filtered views
+    q = query(q, limit(filter ? 1000 : 200));
+
+    return onSnapshot(q, (snap) => {
+      let docs = snap.docs.map((d) => fromFirestoreDoc<ExpenseDocument>(d));
+      
+      // Client-side filtering for dates since Firestore needs composite indexes for where+orderBy on different fields
+      if (filter?.startDate) {
+        const start = new Date(filter.startDate);
+        start.setHours(0, 0, 0, 0);
+        docs = docs.filter((d) => d.documentDate >= start);
+      }
+      if (filter?.endDate) {
+        const end = new Date(filter.endDate);
+        end.setHours(23, 59, 59, 999);
+        docs = docs.filter((d) => d.documentDate <= end);
+      }
+      if (filter?.searchText) {
+        const qSearch = filter.searchText.toLowerCase();
+        docs = docs.filter((d) => 
+          d.vendorName.toLowerCase().includes(qSearch) ||
+          (d.receiptNumber ?? '').toLowerCase().includes(qSearch) ||
+          (d.place ?? '').toLowerCase().includes(qSearch)
+        );
+      }
+
+      callback(docs);
+    });
   },
 };
 

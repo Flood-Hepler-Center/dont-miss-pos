@@ -78,6 +78,7 @@ export default function ExpensesPage() {
   const totalConfirmed = displayDocs.filter((d) => d.status === 'confirmed').reduce((s, d) => s + d.total, 0);
   const totalDraft = displayDocs.filter((d) => d.status === 'draft').length;
   const totalAIReview = displayDocs.filter((d) => d.status === 'ai_review').length;
+  const totalProcessing = displayDocs.filter((d) => d.status === 'ai_processing').length;
 
   return (
     <div className="min-h-screen bg-white font-mono">
@@ -125,24 +126,24 @@ export default function ExpensesPage() {
           <div className="text-[10px] text-gray-400">{displayDocs.filter((d) => d.status === 'confirmed').length} docs</div>
         </div>
         <div className="p-4 border-r-2 border-black">
-          <div className="text-[10px] text-gray-500 font-bold">CAPEX</div>
-          <div className="text-xl font-bold mt-1">฿{(stats?.capexTotal ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 0 })}</div>
-          <div className="text-[10px] text-gray-400">Equipment, Decor etc.</div>
-        </div>
-        <div className="p-4 border-r-2 border-black">
           <div className="text-[10px] text-gray-500 font-bold">INVENTORY</div>
           <div className="text-xl font-bold mt-1">฿{(stats?.inventoryTotal ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 0 })}</div>
           <div className="text-[10px] text-gray-400">Food, Drinks etc.</div>
         </div>
         <div className="p-4 border-r-2 border-black">
-          <div className="text-[10px] text-gray-500 font-bold">PENDING REVIEW</div>
+          <div className="text-[10px] text-gray-500 font-bold">CAPEX / OPERATING</div>
+          <div className="text-xl font-bold mt-1">฿{((stats?.capexTotal ?? 0) + (stats?.operatingTotal ?? 0)).toLocaleString('th-TH', { minimumFractionDigits: 0 })}</div>
+          <div className="text-[10px] text-gray-400">Equipment & Admin</div>
+        </div>
+        <div className="p-4 border-r-2 border-black">
+          <div className="text-[10px] text-gray-500 font-bold">NEEDS REVIEW</div>
           <div className="text-xl font-bold mt-1 text-yellow-600">{totalAIReview}</div>
-          <div className="text-[10px] text-gray-400">AI needs review</div>
+          <div className="text-[10px] text-gray-400">AI confidence low</div>
         </div>
         <div className="p-4">
-          <div className="text-[10px] text-gray-500 font-bold">DRAFTS</div>
-          <div className="text-xl font-bold mt-1 text-gray-500">{totalDraft}</div>
-          <div className="text-[10px] text-gray-400">Unconfirmed</div>
+          <div className="text-[10px] text-gray-500 font-bold">PENDING / DRAFT</div>
+          <div className="text-xl font-bold mt-1 text-gray-500">{totalDraft + totalProcessing}</div>
+          <div className="text-[10px] text-gray-400">{totalDraft} drafts, {totalProcessing} processing</div>
         </div>
       </div>
 
@@ -197,9 +198,10 @@ export default function ExpensesPage() {
             className="border-2 border-black px-2 py-1 text-xs font-bold font-mono"
           >
             <option value="">ALL STATUS</option>
-            <option value="draft">DRAFT</option>
             <option value="confirmed">CONFIRMED</option>
             <option value="ai_review">NEEDS REVIEW</option>
+            <option value="ai_processing">AI PROCESSING</option>
+            <option value="draft">DRAFT</option>
           </select>
 
           <div className="relative flex-1 min-w-40">

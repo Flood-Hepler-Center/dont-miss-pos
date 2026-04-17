@@ -15,6 +15,8 @@ import type {
   ExpenseVendor,
   ExpenseFilter,
   ExpenseStats,
+  ExpenseDocumentStatus,
+  ExpenseMainCategory,
 } from '@/types/expense';
 
 export function useExpenseDocuments(filter?: ExpenseFilter) {
@@ -22,37 +24,31 @@ export function useExpenseDocuments(filter?: ExpenseFilter) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const { startDate, endDate, status, searchText } = filter || {};
-  const startIso = startDate?.toISOString() ?? '';
-  const endIso = endDate?.toISOString() ?? '';
+  // Stable dependency keys
+  const startIso = filter?.startDate?.toISOString() ?? '';
+  const endIso = filter?.endDate?.toISOString() ?? '';
+  const status = filter?.status ?? '';
+  const mainCategory = filter?.mainCategory ?? '';
+  const searchText = filter?.searchText ?? '';
 
   useEffect(() => {
     setLoading(true);
-    const unsub = expenseDocumentService.subscribeAll((docs) => {
-      let filtered = docs;
-      
-      const parsedStart = startIso ? new Date(startIso) : null;
-      const parsedEnd = endIso ? new Date(endIso) : null;
-
-      if (parsedStart) filtered = filtered.filter((d) => d.documentDate >= parsedStart);
-      if (parsedEnd) filtered = filtered.filter((d) => d.documentDate <= parsedEnd);
-      if (status) filtered = filtered.filter((d) => d.status === status);
-      
-      if (searchText) {
-        const q = searchText.toLowerCase();
-        filtered = filtered.filter(
-          (d) =>
-            d.vendorName.toLowerCase().includes(q) ||
-            (d.receiptNumber ?? '').toLowerCase().includes(q) ||
-            (d.place ?? '').toLowerCase().includes(q)
-        );
+    const unsub = expenseDocumentService.subscribeAll(
+      (docs) => {
+        setDocuments(docs);
+        setLoading(false);
+        setError(null);
+      },
+      {
+        startDate: startIso ? new Date(startIso) : undefined,
+        endDate: endIso ? new Date(endIso) : undefined,
+        status: status as ExpenseDocumentStatus,
+        mainCategory: mainCategory as ExpenseMainCategory,
+        searchText: searchText,
       }
-      setDocuments(filtered);
-      setLoading(false);
-      setError(null);
-    });
+    );
     return () => unsub();
-  }, [startIso, endIso, status, searchText]);
+  }, [startIso, endIso, status, mainCategory, searchText]);
 
   const confirmDocument = useCallback(async (id: string) => {
     await expenseDocumentService.confirm(id, 'admin');
