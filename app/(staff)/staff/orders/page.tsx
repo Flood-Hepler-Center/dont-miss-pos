@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { message } from 'antd';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { orderService } from '@/lib/services/order.service';
@@ -11,6 +11,7 @@ import { OrderTypeBadge } from '@/components/orders/OrderTypeBadge';
 
 export default function OrdersPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [searchText, setSearchText] = useState('');
@@ -20,6 +21,13 @@ export default function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // Dynamic base path detection
+  const isStaffPath = pathname.startsWith('/staff');
+  // For create/edit, we always want to use the consistent create/edit routes
+  const createPath = isStaffPath ? '/staff/orders/create' : '/admin/orders/create';
+  const getEditPath = (id: string) => isStaffPath ? `/staff/orders/${id}/edit` : `/admin/orders/${id}/edit`;
+
 
   useEffect(() => {
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
@@ -102,7 +110,7 @@ export default function OrdersPage() {
         {/* Controls */}
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <button
-            onClick={() => router.push('/staff/orders/create')}
+            onClick={() => router.push(createPath)}
             className="px-6 py-3 border-2 border-black bg-black text-white font-bold text-sm hover:bg-gray-800 transition-colors"
           >
             [+ CREATE ORDER]
@@ -194,7 +202,7 @@ export default function OrdersPage() {
                         [VIEW]
                       </button>
                       <button
-                        onClick={() => router.push(`/staff/orders/${order.id}/edit`)}
+                        onClick={() => router.push(getEditPath(order.id))}
                         className="px-2 py-1 border border-black text-xs hover:bg-gray-100"
                       >
                         [EDIT]
@@ -258,7 +266,7 @@ export default function OrdersPage() {
                     [VIEW]
                   </button>
                   <button
-                    onClick={() => router.push(`/staff/orders/${order.id}/edit`)}
+                    onClick={() => router.push(getEditPath(order.id))}
                     className="px-4 py-2 border-2 border-black bg-black text-white text-xs font-bold hover:bg-gray-800"
                   >
                     [EDIT]
@@ -350,7 +358,7 @@ export default function OrdersPage() {
                 {/* Actions */}
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <button
-                    onClick={() => router.push(`/staff/orders/${selectedOrder.id}/edit`)}
+                    onClick={() => router.push(getEditPath(selectedOrder.id))}
                     className="col-span-2 px-6 py-3 border-2 border-black bg-black text-white font-bold text-sm hover:bg-gray-800 transition-colors"
                   >
                     [EDIT ORDER]

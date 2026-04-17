@@ -4,13 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { orderService } from '@/lib/services/order.service';
+import { tableService } from '@/lib/services/table.service';
 import type { Table, Order } from '@/types';
-import { X } from 'lucide-react';
+import { X, ArrowRightLeft } from 'lucide-react';
 
 export default function TablesPage() {
   const [tables, setTables] = useState<Table[]>([]);
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
   const [tableOrders, setTableOrders] = useState<Order[]>([]);
+  const [isChangingTable, setIsChangingTable] = useState(false);
+  const [targetTable, setTargetTable] = useState<Table | null>(null);
+  const [loading, setLoading] = useState(false);
   const unsubscribeOrdersRef = useRef<(() => void) | null>(null);
 
   // Subscribe to all tables
@@ -54,9 +58,26 @@ export default function TablesPage() {
   const handleCloseModal = () => {
     setSelectedTable(null);
     setTableOrders([]);
+    setIsChangingTable(false);
+    setTargetTable(null);
     if (unsubscribeOrdersRef.current) {
       unsubscribeOrdersRef.current();
       unsubscribeOrdersRef.current = null;
+    }
+  };
+
+  const handleChangeTable = async () => {
+    if (!selectedTable || !targetTable) return;
+    
+    setLoading(true);
+    try {
+      await tableService.moveTable(selectedTable.id, targetTable.id);
+      handleCloseModal();
+    } catch (error) {
+      console.error('Failed to move table:', error);
+      alert('Failed to move table');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -155,7 +176,70 @@ export default function TablesPage() {
 
               {/* Modal Body */}
               <div className="p-4">
-                {tableOrders.length > 0 ? (
+                {isChangingTable ? (
+                  <div className="space-y-6">
+                    <h3 className="text-sm font-bold text-center border-b-2 border-black pb-2">
+                      [ SELECT NEW TABLE ]
+                    </h3>
+                    
+                    <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-3">
+                      {tables
+                        .filter(t => t.id !== selectedTable.id && t.isActive)
+                        .map((table) => (
+                          <button
+                            key={table.id}
+                            onClick={() => setTargetTable(table)}
+                            className={`aspect-square border-2 border-black p-2 transition-all ${
+                              targetTable?.id === table.id 
+                                ? 'bg-black text-white scale-105 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)]' 
+                                : table.status === 'OCCUPIED'
+                                  ? 'bg-gray-100 border-dashed opacity-60'
+                                  : 'bg-white hover:bg-gray-50'
+                            }`}
+                          >
+                            <div className="flex flex-col items-center justify-center h-full">
+                              <p className="text-xl font-bold">{table.tableNumber}</p>
+                              <p className="text-[10px]">
+                                {table.status === 'OCCUPIED' ? 'OCCUPIED' : 'VACANT'}
+                              </p>
+                            </div>
+                          </button>
+                        ))}
+                    </div>
+
+                    {targetTable && (
+                      <div className="border-2 border-black p-4 bg-gray-50 animate-in fade-in zoom-in duration-200">
+                        <div className="flex items-center justify-center gap-4 text-center">
+                          <div>
+                            <p className="text-xs text-gray-500">CURRENT</p>
+                            <p className="text-xl font-bold">TABLE {selectedTable.tableNumber}</p>
+                          </div>
+                          <ArrowRightLeft className="text-gray-400" />
+                          <div>
+                            <p className="text-xs text-gray-500">NEW</p>
+                            <p className="text-xl font-bold">TABLE {targetTable.tableNumber}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="mt-6 grid grid-cols-2 gap-3">
+                          <button
+                            onClick={() => { setIsChangingTable(false); setTargetTable(null); }}
+                            className="px-6 py-3 border-2 border-black bg-white text-black font-bold text-sm hover:bg-gray-100 transition-colors"
+                          >
+                            [CANCEL]
+                          </button>
+                          <button
+                            onClick={handleChangeTable}
+                            disabled={loading}
+                            className="px-6 py-3 border-2 border-black bg-black text-white font-bold text-sm hover:bg-gray-800 transition-colors disabled:opacity-50"
+                          >
+                            {loading ? '[MOVING...]' : '[CONFIRM MOVE]'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : tableOrders.length > 0 ? (
                   <div>
                     <h3 className="text-sm font-bold mb-3 text-center border-b-2 border-black pb-2">
                       [ UNPAID ORDERS: {tableOrders.length} ]
@@ -223,6 +307,17 @@ export default function TablesPage() {
                     <div className="mt-4 border-2 border-black p-3 flex justify-between text-lg font-bold">
                       <span>GRAND TOTAL:</span>
                       <span>฿{grandTotal.toFixed(2)}</span>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="mt-6 grid grid-cols-1 gap-3">
+                      <button
+                        onClick={() => setIsChangingTable(true)}
+                        className="flex items-center justify-center gap-2 px-6 py-3 border-2 border-black bg-white text-black font-bold text-sm hover:bg-gray-100 transition-colors"
+                      >
+                        <ArrowRightLeft size={16} />
+                        [CHANGE TABLE]
+                      </button>
                     </div>
                   </div>
                 ) : (

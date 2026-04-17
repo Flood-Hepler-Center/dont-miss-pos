@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { menuService } from '@/lib/services/menu.service';
@@ -11,8 +11,8 @@ import Image from 'next/image';
 export default function MenuItemsPage() {
   const [items, setItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<MenuCategory[]>([]);
-  const [filteredItems, setFilteredItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reorderingCategoryId, setReorderingCategoryId] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>('');
@@ -33,7 +33,7 @@ export default function MenuItemsPage() {
   const [imagePreview, setImagePreview] = useState<string>('');
 
   useEffect(() => {
-    const q = query(collection(db, 'menuItems'), orderBy('name', 'asc'));
+    const q = query(collection(db, 'menuItems'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const itemsData = snapshot.docs.map((doc) => {
         const data = doc.data();
@@ -45,7 +45,6 @@ export default function MenuItemsPage() {
         };
       }) as MenuItem[];
       setItems(itemsData.filter((i) => i.isActive));
-      setFilteredItems(itemsData.filter((i) => i.isActive));
     });
 
     return () => unsubscribe();
@@ -69,21 +68,91 @@ export default function MenuItemsPage() {
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    let filtered = items;
+  /**
+   * Build the ordered view of items:
+   * - First filter by search/category
+   * - Then group by category (category displayOrder ascending)
+   * - Within a category, items are sorted by item displayOrder
+   */
+  const { groups, flatCount } = useMemo(() => {
+    const searchLower = searchText.trim().toLowerCase();
+    const filtered = items.filter((item) => {
+      if (categoryFilter && item.categoryId !== categoryFilter) return false;
+      if (searchLower && !item.name.toLowerCase().includes(searchLower)) return false;
+      return true;
+    });
 
-    if (categoryFilter) {
-      filtered = filtered.filter((item) => item.categoryId === categoryFilter);
+    // Ordered list of categories to render as groups
+    const catOrder = [...categories].sort(
+      (a, b) => (a.displayOrder ?? 999) - (b.displayOrder ?? 999)
+    );
+
+    const groupList: { category: MenuCategory | null; items: MenuItem[] }[] = [];
+    catOrder.forEach((cat) => {
+      const catItems = filtered
+        .filter((i) => i.categoryId === cat.id)
+        .sort((a, b) => {
+          const diff = (a.displayOrder ?? 999) - (b.displayOrder ?? 999);
+          if (diff !== 0) return diff;
+          return (a.name || '').localeCompare(b.name || '');
+        });
+      if (catItems.length > 0) groupList.push({ category: cat, items: catItems });
+    });
+
+    // Orphan items (no matching category)
+    const knownCatIds = new Set(catOrder.map((c) => c.id));
+    const orphans = filtered
+      .filter((i) => !knownCatIds.has(i.categoryId))
+      .sort((a, b) => (a.displayOrder ?? 999) - (b.displayOrder ?? 999));
+    if (orphans.length > 0) groupList.push({ category: null, items: orphans });
+
+    return { groups: groupList, flatCount: filtered.length };
+  }, [items, categories, categoryFilter, searchText]);
+
+  const searchActive = searchText.trim().length > 0;
+
+  /**
+   * Reorder an item within its category. Uses the full (unfiltered) sorted
+   * list for that category so ordering is preserved across filters.
+   */
+  const handleMoveItem = async (item: MenuItem, direction: -1 | 1) => {
+    if (searchActive || reorderingCategoryId) return;
+
+    const sameCat = items
+      .filter((i) => i.categoryId === item.categoryId)
+      .sort((a, b) => {
+        const diff = (a.displayOrder ?? 999) - (b.displayOrder ?? 999);
+        if (diff !== 0) return diff;
+        return (a.name || '').localeCompare(b.name || '');
+      });
+
+    const index = sameCat.findIndex((i) => i.id === item.id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= sameCat.length) return;
+
+    const next = [...sameCat];
+    [next[index], next[target]] = [next[target], next[index]];
+
+    // Optimistic update: patch displayOrder locally so UI updates before round-trip
+    setItems((prev) => {
+      const map = new Map(prev.map((i) => [i.id, i]));
+      next.forEach((i, idx) => {
+        const existing = map.get(i.id);
+        if (existing) map.set(i.id, { ...existing, displayOrder: idx });
+      });
+      return Array.from(map.values());
+    });
+
+    setReorderingCategoryId(item.categoryId);
+    try {
+      await menuService.reorderItems(next.map((i) => i.id));
+    } catch (error) {
+      console.error('Failed to reorder items:', error);
+      alert('Failed to reorder items');
+    } finally {
+      setReorderingCategoryId(null);
     }
-
-    if (searchText) {
-      filtered = filtered.filter((item) =>
-        item.name.toLowerCase().includes(searchText.toLowerCase())
-      );
-    }
-
-    setFilteredItems(filtered);
-  }, [categoryFilter, searchText, items]);
+  };
 
   const handleAdd = () => {
     setEditingItem(null);
@@ -149,7 +218,16 @@ export default function MenuItemsPage() {
       if (editingItem) {
         await menuService.updateItem(editingItem.id, formData);
       } else {
-        await menuService.createItem(formData);
+        // Auto-assign displayOrder = (max in same category) + 1 so new items land at the end
+        const categoryItems = items.filter((i) => i.categoryId === formData.categoryId);
+        const maxOrder = categoryItems.reduce(
+          (max, i) => Math.max(max, i.displayOrder ?? -1),
+          -1
+        );
+        await menuService.createItem({
+          ...formData,
+          displayOrder: maxOrder + 1,
+        });
       }
       setModalVisible(false);
       setFormData({ name: '', description: '', price: 0, costPrice: 0, categoryId: '', isAvailable: true, hasStockTracking: false, stock: 0, imageUrl: '', modifiers: [] });
@@ -170,7 +248,7 @@ export default function MenuItemsPage() {
           <div className="text-sm hidden md:block">════════════════════════════════════</div>
           <div className="text-xl md:hidden">═══════════</div>
           <h1 className="text-xl md:text-2xl font-bold my-2">MENU ITEMS</h1>
-          <p className="text-xs md:text-sm">{filteredItems.length} Items</p>
+          <p className="text-xs md:text-sm">{flatCount} Items</p>
           <div className="text-sm hidden md:block">════════════════════════════════════</div>
           <div className="text-xl md:hidden">══</div>
         </div>
@@ -202,151 +280,217 @@ export default function MenuItemsPage() {
           </select>
         </div>
 
-        {/* Items Grid - Mobile Cards, Desktop Table */}
-        <div className="hidden md:block border-2 border-black">
-          <div className="border-b-2 border-black p-3 bg-white">
-            <div className="grid grid-cols-7 gap-4 text-xs font-bold">
-              <div>IMAGE</div>
-              <div>NAME</div>
-              <div>CATEGORY</div>
-              <div>PRICE</div>
-              <div>COST</div>
-              <div>STATUS</div>
-              <div>ACTIONS</div>
-            </div>
+        {/* Reorder hint when search is active */}
+        {searchActive && (
+          <div className="mb-4 border-2 border-dashed border-black p-3 text-center text-xs">
+            REORDER BUTTONS ARE DISABLED WHILE SEARCHING. CLEAR SEARCH TO REORDER.
           </div>
-          <div className="divide-y-2 divide-black max-h-[600px] overflow-y-auto">
-            {filteredItems.map((item) => {
-              const cat = categories.find(c => c.id === item.categoryId);
-              const margin = item.costPrice && item.price
-                ? ((item.price - item.costPrice) / item.price * 100).toFixed(1)
-                : null;
-              return (
-                <div key={item.id} className="p-3 hover:bg-gray-50">
-                  <div className="grid grid-cols-7 gap-4 text-sm items-center">
-                    <div>
-                      {item.imageUrl ? (
-                        <div className="relative w-12 h-12">
-                          <Image
-                            src={item.imageUrl}
-                            alt={item.name}
-                            fill
-                            className="object-cover border border-black"
-                            unoptimized
-                          />
-                        </div>
-                      ) : (
-                        <div className="w-12 h-12 border-2 border-dashed border-black" />
-                      )}
-                    </div>
-                    <div className="font-bold">{item.name}</div>
-                    <div className="text-xs">{cat?.name || '-'}</div>
-                    <div className="font-bold">฿{item.price.toFixed(2)}</div>
-                    <div className="text-xs">
-                      {item.costPrice ? `฿${item.costPrice.toFixed(2)}` : '-'}
-                      {margin && <div className="text-gray-600">{margin}%</div>}
-                    </div>
-                    <div>
-                      <span className={`px-2 py-1 border-2 border-black text-xs ${item.isAvailable ? '' : 'bg-red-50'}`}>
-                        {item.isAvailable ? 'AVAILABLE' : "86'D"}
-                      </span>
-                      {item.hasStockTracking && (
-                        <div className="mt-1 text-xs font-bold text-gray-700">
-                          STOCK: {item.stock}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleToggle86(item.id, item.isAvailable)}
-                        className="px-2 py-1 border border-black text-xs hover:bg-gray-100"
-                      >
-                        {item.isAvailable ? '[OFF]' : '[ON]'}
-                      </button>
-                      <button
-                        onClick={() => handleEdit(item)}
-                        className="px-2 py-1 border border-black text-xs hover:bg-gray-100"
-                      >
-                        [EDIT]
-                      </button>
-                      <button
-                        onClick={() => setDeleteConfirm(item.id)}
-                        className="px-2 py-1 border border-black text-xs hover:bg-red-50"
-                      >
-                        [DEL]
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {filteredItems.length === 0 && (
-              <div className="p-12 text-center text-gray-600">
-                <p className="text-sm">NO ITEMS FOUND</p>
-              </div>
-            )}
-          </div>
-        </div>
+        )}
 
-        {/* Mobile Cards */}
-        <div className="md:hidden space-y-3">
-          {filteredItems.map((item) => {
-            const cat = categories.find(c => c.id === item.categoryId);
+        {/* Grouped Items (Desktop + Mobile) */}
+        <div className="space-y-6">
+          {groups.map(({ category, items: catItems }) => {
+            const catLabel = category?.name || 'UNCATEGORIZED';
+            const catId = category?.id || '__none__';
             return (
-              <div key={item.id} className="border-2 border-black p-4">
-                <div className="flex gap-3 mb-3">
-                  {item.imageUrl ? (
-                    <div className="relative w-16 h-16 shrink-0">
-                      <Image
-                        src={item.imageUrl}
-                        alt={item.name}
-                        fill
-                        className="object-cover border border-black"
-                        unoptimized
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-16 h-16 border-2 border-dashed border-black" />
-                  )}
-                  <div className="flex-1">
-                    <p className="font-bold text-sm">{item.name}</p>
-                    <p className="text-xs text-gray-600">{cat?.name}</p>
-                    <p className="text-sm font-bold mt-1">฿{item.price.toFixed(2)}</p>
-                  </div>
-                  <div className="flex flex-col gap-1 items-end">
-                    <span className={`px-2 py-1 border-2 border-black text-xs h-fit ${item.isAvailable ? '' : 'bg-red-50'}`}>
-                      {item.isAvailable ? 'ON' : "86"}
-                    </span>
-                    {item.hasStockTracking && (
-                      <span className="text-xs font-bold text-gray-700">
-                        STOCK: {item.stock}
-                      </span>
-                    )}
+              <div key={catId} className="border-2 border-black">
+                {/* Category Header */}
+                <div className="border-b-2 border-black bg-black text-white p-3 text-center">
+                  <div className="text-xs font-black tracking-widest uppercase">
+                    {catLabel} <span className="opacity-60">({catItems.length})</span>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => handleToggle86(item.id, item.isAvailable)}
-                    className="px-3 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
-                  >
-                    {item.isAvailable ? '[OFF]' : '[ON]'}
-                  </button>
-                  <button
-                    onClick={() => handleEdit(item)}
-                    className="px-3 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
-                  >
-                    [EDIT]
-                  </button>
-                  <button
-                    onClick={() => setDeleteConfirm(item.id)}
-                    className="px-3 py-2 border-2 border-black text-xs font-bold hover:bg-red-50"
-                  >
-                    [DEL]
-                  </button>
+
+                {/* Desktop Table */}
+                <div className="hidden md:block">
+                  <div className="border-b-2 border-black p-3 bg-gray-50">
+                    <div className="grid grid-cols-12 gap-3 text-xs font-bold">
+                      <div className="col-span-1">#</div>
+                      <div className="col-span-1">IMAGE</div>
+                      <div className="col-span-3">NAME</div>
+                      <div className="col-span-1">PRICE</div>
+                      <div className="col-span-1">COST</div>
+                      <div className="col-span-2">STATUS</div>
+                      <div className="col-span-1">REORDER</div>
+                      <div className="col-span-2">ACTIONS</div>
+                    </div>
+                  </div>
+                  <div className="divide-y-2 divide-black">
+                    {catItems.map((item, index) => {
+                      const margin = item.costPrice && item.price
+                        ? ((item.price - item.costPrice) / item.price * 100).toFixed(1)
+                        : null;
+                      const isReordering = reorderingCategoryId === item.categoryId;
+                      const canMoveUp = !searchActive && !isReordering && index > 0;
+                      const canMoveDown = !searchActive && !isReordering && index < catItems.length - 1;
+                      return (
+                        <div key={item.id} className="p-3 hover:bg-gray-50">
+                          <div className="grid grid-cols-12 gap-3 text-sm items-center">
+                            <div className="col-span-1 text-xs font-bold">#{index + 1}</div>
+                            <div className="col-span-1">
+                              {item.imageUrl ? (
+                                <div className="relative w-12 h-12">
+                                  <Image
+                                    src={item.imageUrl}
+                                    alt={item.name}
+                                    fill
+                                    className="object-cover border border-black"
+                                    unoptimized
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-12 h-12 border-2 border-dashed border-black" />
+                              )}
+                            </div>
+                            <div className="col-span-3 font-bold">{item.name}</div>
+                            <div className="col-span-1 font-bold">฿{item.price.toFixed(2)}</div>
+                            <div className="col-span-1 text-xs">
+                              {item.costPrice ? `฿${item.costPrice.toFixed(2)}` : '-'}
+                              {margin && <div className="text-gray-600">{margin}%</div>}
+                            </div>
+                            <div className="col-span-2">
+                              <span className={`px-2 py-1 border-2 border-black text-xs ${item.isAvailable ? '' : 'bg-red-50'}`}>
+                                {item.isAvailable ? 'AVAILABLE' : "86'D"}
+                              </span>
+                              {item.hasStockTracking && (
+                                <div className="mt-1 text-xs font-bold text-gray-700">
+                                  STOCK: {item.stock}
+                                </div>
+                              )}
+                            </div>
+                            <div className="col-span-1 flex gap-1">
+                              <button
+                                onClick={() => handleMoveItem(item, -1)}
+                                disabled={!canMoveUp}
+                                className="px-2 py-1 border border-black text-xs hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title="Move up"
+                              >
+                                [↑]
+                              </button>
+                              <button
+                                onClick={() => handleMoveItem(item, 1)}
+                                disabled={!canMoveDown}
+                                className="px-2 py-1 border border-black text-xs hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                                title="Move down"
+                              >
+                                [↓]
+                              </button>
+                            </div>
+                            <div className="col-span-2 flex gap-2">
+                              <button
+                                onClick={() => handleToggle86(item.id, item.isAvailable)}
+                                className="px-2 py-1 border border-black text-xs hover:bg-gray-100"
+                              >
+                                {item.isAvailable ? '[OFF]' : '[ON]'}
+                              </button>
+                              <button
+                                onClick={() => handleEdit(item)}
+                                className="px-2 py-1 border border-black text-xs hover:bg-gray-100"
+                              >
+                                [EDIT]
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirm(item.id)}
+                                className="px-2 py-1 border border-black text-xs hover:bg-red-50"
+                              >
+                                [DEL]
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Mobile Cards */}
+                <div className="md:hidden divide-y-2 divide-black">
+                  {catItems.map((item, index) => {
+                    const isReordering = reorderingCategoryId === item.categoryId;
+                    const canMoveUp = !searchActive && !isReordering && index > 0;
+                    const canMoveDown = !searchActive && !isReordering && index < catItems.length - 1;
+                    return (
+                      <div key={item.id} className="p-4">
+                        <div className="flex gap-3 mb-3">
+                          {item.imageUrl ? (
+                            <div className="relative w-16 h-16 shrink-0">
+                              <Image
+                                src={item.imageUrl}
+                                alt={item.name}
+                                fill
+                                className="object-cover border border-black"
+                                unoptimized
+                              />
+                            </div>
+                          ) : (
+                            <div className="w-16 h-16 border-2 border-dashed border-black" />
+                          )}
+                          <div className="flex-1">
+                            <p className="font-bold text-sm">
+                              #{index + 1} {item.name}
+                            </p>
+                            <p className="text-sm font-bold mt-1">฿{item.price.toFixed(2)}</p>
+                          </div>
+                          <div className="flex flex-col gap-1 items-end">
+                            <span className={`px-2 py-1 border-2 border-black text-xs h-fit ${item.isAvailable ? '' : 'bg-red-50'}`}>
+                              {item.isAvailable ? 'ON' : "86"}
+                            </span>
+                            {item.hasStockTracking && (
+                              <span className="text-xs font-bold text-gray-700">
+                                STOCK: {item.stock}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-5 gap-2">
+                          <button
+                            onClick={() => handleMoveItem(item, -1)}
+                            disabled={!canMoveUp}
+                            className="px-2 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Move up"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            onClick={() => handleMoveItem(item, 1)}
+                            disabled={!canMoveDown}
+                            className="px-2 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Move down"
+                          >
+                            ↓
+                          </button>
+                          <button
+                            onClick={() => handleToggle86(item.id, item.isAvailable)}
+                            className="px-2 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
+                          >
+                            {item.isAvailable ? 'OFF' : 'ON'}
+                          </button>
+                          <button
+                            onClick={() => handleEdit(item)}
+                            className="px-2 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
+                          >
+                            EDIT
+                          </button>
+                          <button
+                            onClick={() => setDeleteConfirm(item.id)}
+                            className="px-2 py-2 border-2 border-black text-xs font-bold hover:bg-red-50"
+                          >
+                            DEL
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
           })}
+
+          {groups.length === 0 && (
+            <div className="border-2 border-dashed border-black p-12 text-center text-gray-600">
+              <p className="text-sm">NO ITEMS FOUND</p>
+            </div>
+          )}
         </div>
 
         {/* Add/Edit Modal */}

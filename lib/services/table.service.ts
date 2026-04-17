@@ -9,6 +9,7 @@ import {
   orderBy,
   serverTimestamp,
   writeBatch,
+  runTransaction,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { Table, TableStatus, Order } from '@/types';
@@ -129,6 +130,54 @@ export const tableService = {
     } catch (error) {
       console.error('Error initializing tables:', error);
       throw new Error('Failed to initialize tables');
+    }
+  },
+
+  async moveTable(sourceTableId: string, targetTableId: string): Promise<void> {
+    try {
+      await runTransaction(db, async (transaction) => {
+        const sourceRef = doc(db, 'tables', sourceTableId);
+        const targetRef = doc(db, 'tables', targetTableId);
+
+        const sourceSnap = await transaction.get(sourceRef);
+        const targetSnap = await transaction.get(targetRef);
+
+        if (!sourceSnap.exists()) throw new Error('Source table not found');
+        if (!targetSnap.exists()) throw new Error('Target table not found');
+
+        const sourceData = sourceSnap.data() as Table;
+        const targetData = targetSnap.data() as Table;
+
+        const orderIds = sourceData.activeOrders || [];
+        
+        // 1. Update all active orders
+        for (const orderId of orderIds) {
+          const orderRef = doc(db, 'orders', orderId);
+          transaction.update(orderRef, {
+            tableId: targetTableId,
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        // 2. Update target table
+        transaction.update(targetRef, {
+          status: sourceData.status,
+          activeOrders: [...(targetData.activeOrders || []), ...orderIds],
+          currentSessionId: sourceData.currentSessionId || targetData.currentSessionId,
+          updatedAt: serverTimestamp(),
+        });
+
+        // 3. Reset source table
+        transaction.update(sourceRef, {
+          status: 'VACANT',
+          activeOrders: [],
+          currentSessionId: null,
+          updatedAt: serverTimestamp(),
+        });
+      });
+    } catch (error) {
+      console.error('Error moving table:', error);
+      throw error;
     }
   },
 };

@@ -18,6 +18,7 @@ export type Table = {
   status: TableStatus;
   isActive: boolean;
   activeOrders?: string[];
+  currentSessionId?: string | null;
   currentSession?: {
     sessionId: string;
     startedAt: Date;

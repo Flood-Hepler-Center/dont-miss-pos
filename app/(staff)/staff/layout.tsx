@@ -5,25 +5,37 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/stores/authStore';
 import { StaffNotifications } from '@/components/staff/StaffNotifications';
 import { useLateBookingsCount } from '@/lib/hooks/useLateBookingsCount';
+import { 
+  LayoutDashboard, 
+  ShoppingCart, 
+  Table, 
+  Calendar, 
+  CreditCard, 
+  ChefHat,
+  Menu as MenuIcon,
+  X,
+  Bell
+} from 'lucide-react';
 
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, logout, staffId, staffName, _hasHydrated } = useAuthStore();
-  const isKDS = pathname === '/staff/kds';
-  const [navExpanded, setNavExpanded] = useState(!isKDS);
   const lateBookingsCount = useLateBookingsCount();
-
-  // Whenever the route changes to/from KDS, sync the nav state
-  useEffect(() => {
-    setNavExpanded(!isKDS);
-  }, [isKDS]);
+  
+  const isKDS = pathname === '/staff/kds';
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
     if (_hasHydrated && !isAuthenticated) {
       router.push('/login');
     }
   }, [isAuthenticated, router, _hasHydrated]);
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
 
   if (!_hasHydrated) {
     return (
@@ -42,107 +54,151 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   }
 
   const navItems = [
-    { path: '/staff/dashboard', label: 'DASHBOARD' },
-    { path: '/staff/orders', label: 'ORDERS' },
-    { path: '/staff/tables', label: 'TABLES' },
-    { path: '/staff/bookings', label: 'BOOKINGS' },
-    { path: '/staff/cashier', label: 'CASHIER' },
-    { path: '/staff/kds', label: 'KITCHEN' },
+    { path: '/staff/dashboard', label: 'DASHBOARD', icon: LayoutDashboard },
+    { path: '/staff/orders', label: 'ORDERS', icon: ShoppingCart },
+    { path: '/staff/tables', label: 'TABLES', icon: Table },
+    { path: '/staff/bookings', label: 'BOOKINGS', icon: Calendar, badge: lateBookingsCount },
+    { path: '/staff/cashier', label: 'CASHIER', icon: CreditCard },
+    { path: '/staff/kds', label: 'KITCHEN', icon: ChefHat },
   ];
 
   return (
-    <div className="min-h-screen bg-white font-mono">
-
-      {/* KDS-only: floating toggle button when nav is hidden */}
-      {isKDS && !navExpanded && (
-        <button
-          onClick={() => setNavExpanded(true)}
-          title="Show navigation"
-          className="fixed top-3 left-3 z-[100] flex items-center gap-2 bg-slate-800/90 hover:bg-slate-700 text-white text-sm font-bold px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm transition-all border border-slate-600"
-          style={{ fontFamily: "'Nunito', sans-serif" }}
-        >
-          <span className="text-lg">☰</span>
-          <span className="text-xs tracking-wide">MENU</span>
-        </button>
-      )}
-
-      {/* Top Navigation — hidden on KDS when collapsed */}
-      {(!isKDS || navExpanded) && (
-        <div className="border-b-2 border-black sticky top-0 bg-white z-50">
-          <div className="px-4 py-3">
-            <div className="flex items-center justify-between">
-              {/* Logo/Title */}
-              <div className="flex items-center gap-4">
-                <div className="text-sm">══════</div>
-                <h1 className="text-xl font-bold">DON&apos;T MISS THIS SATURDAY</h1>
-                <div className="text-sm">══════</div>
-              </div>
-
-              {/* User Info + KDS close button */}
-              <div className="flex items-center gap-4">
-                {isKDS && navExpanded && (
-                  <button
-                    onClick={() => setNavExpanded(false)}
-                    title="Hide navigation (KDS mode)"
-                    className="text-xs font-bold px-3 py-1 bg-slate-900 text-white rounded-lg hover:bg-slate-700 transition-colors"
-                  >
-                    ✕ HIDE
-                  </button>
-                )}
-                <div className="text-right">
-                  <div className="text-sm font-bold">{staffName || 'STAFF'}</div>
-                  <button
-                    onClick={() => { logout(); router.push('/login'); }}
-                    className="text-xs underline hover:no-underline"
-                  >
-                    [LOGOUT]
-                  </button>
-                </div>
-              </div>
-            </div>
+    <div className="min-h-screen bg-white font-mono flex flex-col">
+      {/* Top Navigation Bar */}
+      <header className={`${isKDS ? 'bg-white/80 backdrop-blur-sm shadow-sm' : 'bg-white border-b-2 border-black'} sticky top-0 z-[60] flex flex-col transition-all`}>
+        {/* Row 1: Header */}
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="text-[10px] font-bold text-gray-400 hidden sm:block uppercase">Staff Panel</div>
+            <h1 className="text-sm font-bold border-2 border-black px-3 py-1 bg-black text-white tracking-tighter">
+              SATURDAY POS
+            </h1>
           </div>
 
-          {/* Navigation Menu */}
-          <div className="border-t-2 border-black">
-            <div className="flex overflow-x-auto">
+          <div className="flex items-center gap-2 sm:gap-4">
+            <div className="text-right hidden sm:block">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{staffName || 'Staff Member'}</p>
+              <button 
+                onClick={() => { logout(); router.push('/login'); }}
+                className="text-[10px] font-black underline hover:no-underline uppercase"
+              >
+                [LOGOUT]
+              </button>
+            </div>
+            
+            <button 
+              onClick={() => setShowNotifications(true)}
+              className="p-1.5 border-2 border-black bg-white relative active:translate-y-0.5 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:shadow-none transition-all"
+            >
+              <Bell size={18} />
+              <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span>
+            </button>
+
+            {/* Mobile/Small Menu Toggle */}
+            <button 
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="md:hidden p-1.5 border-2 border-black active:translate-y-0.5 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:shadow-none bg-white"
+            >
+              {isMobileMenuOpen ? <X size={18} /> : <MenuIcon size={18} />}
+            </button>
+          </div>
+        </div>
+
+        {/* Row 2: Nav Items (Desktop Only) */}
+        {!isKDS && (
+          <nav className="hidden md:flex border-t-2 border-black bg-white overflow-x-auto no-scrollbar">
+            {navItems.map((item) => {
+              const isActive = pathname === item.path || (item.path !== '/staff/dashboard' && pathname.startsWith(item.path));
+              return (
+                <button
+                  key={item.path}
+                  onClick={() => router.push(item.path)}
+                  className={`flex items-center gap-2 px-6 py-3 text-[11px] font-black tracking-widest transition-all border-r-2 border-black ${
+                    isActive ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-50'
+                  }`}
+                >
+                  <item.icon size={14} />
+                  <span>{item.label}</span>
+                  {item.badge && item.badge > 0 && (
+                    <span className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[9px] ${
+                      isActive ? 'bg-white text-black' : 'bg-red-500 text-white'
+                    } animate-pulse`}>
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            {/* KDS Mode Toggle Button */}
+            <div className="flex-1"></div>
+            <button
+              onClick={() => router.push('/staff/kds')}
+              className="flex items-center gap-2 px-6 py-3 text-[11px] font-black tracking-widest bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+            >
+              <ChefHat size={14} />
+              <span>KITCHEN MODE</span>
+            </button>
+          </nav>
+        )}
+
+        {/* Mobile Menu (Inside header to prevent gap) */}
+        {isMobileMenuOpen && (
+          <div 
+            className="md:hidden w-full bg-white border-t-2 border-black animate-in slide-in-from-top duration-200 overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-4 grid grid-cols-2 gap-3">
               {navItems.map((item) => (
                 <button
                   key={item.path}
                   onClick={() => router.push(item.path)}
-                  className={`px-6 py-3 text-sm font-bold border-r-2 border-black hover:bg-gray-100 transition-colors flex-shrink-0 relative ${
-                    pathname.startsWith(item.path)
-                      ? 'bg-black text-white'
-                      : 'bg-white text-black'
-                  }`}
+                  className="flex flex-col items-center justify-center gap-2 p-4 border-2 border-black bg-white active:bg-gray-100"
                 >
-                  {item.label}
-                  {/* Late bookings badge */}
-                  {item.label === 'BOOKINGS' && lateBookingsCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
-                      {lateBookingsCount}
-                    </span>
-                  )}
+                  <item.icon size={20} />
+                  <span className="text-[10px] font-black tracking-tighter">{item.label}</span>
                 </button>
               ))}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main Content — no pb-24 on KDS since the notification bar is hidden there */}
-      <div className={`m-0 ${isKDS ? '' : 'pb-24'}`}>
-        {children}
-      </div>
-
-      {/* Staff Notifications — hidden on KDS when collapsed */}
-      {(!isKDS || navExpanded) && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-black p-4 z-40">
-          <div className="max-w-7xl mx-auto flex justify-end">
-            <div className="w-80">
-              <StaffNotifications staffId={staffId || 'staff-unknown'} staffName={staffName || undefined} />
+            <div className="p-4 border-t-2 border-black bg-gray-50">
+              <button 
+                onClick={() => { logout(); router.push('/login'); }}
+                className="w-full p-3 border-2 border-black bg-black text-white font-bold text-xs uppercase"
+              >
+                [LOGOUT]
+              </button>
             </div>
           </div>
-        </div>
+        )}
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 w-full max-w-full overflow-x-hidden">
+        {children}
+      </main>
+
+      {/* Notifications Sidebar Overlay */}
+      {showNotifications && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/20 z-[80] backdrop-blur-sm animate-in fade-in duration-200"
+            onClick={() => setShowNotifications(false)}
+          />
+          <aside className="fixed right-0 top-0 bottom-0 w-80 bg-white border-l-2 border-black z-[90] shadow-[-4px_0px_0px_0px_rgba(0,0,0,0.1)] animate-in slide-in-from-right duration-300">
+            <div className="flex flex-col h-full">
+              <div className="p-4 border-b-2 border-black flex items-center justify-between bg-black text-white">
+                <h3 className="font-bold text-sm tracking-widest flex items-center gap-2 uppercase font-mono">
+                  <Bell size={16} /> NOTIFICATIONS
+                </h3>
+                <button onClick={() => setShowNotifications(false)} className="hover:rotate-90 transition-transform">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 font-mono">
+                <StaffNotifications staffId={staffId || 'staff-unknown'} staffName={staffName || undefined} />
+              </div>
+            </div>
+          </aside>
+        </>
       )}
     </div>
   );

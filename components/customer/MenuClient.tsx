@@ -60,7 +60,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
 
   // Sort categories by displayOrder
   const sortedCategories = [...categories].sort(
-    (a, b) => (a.displayOrder || 999) - (b.displayOrder || 999)
+    (a, b) => (a.displayOrder ?? 999) - (b.displayOrder ?? 999)
   );
 
   const filteredItems =
@@ -68,15 +68,15 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
       ? [...items].sort((a, b) => {
         const catA = sortedCategories.find((c) => c.id === a.categoryId);
         const catB = sortedCategories.find((c) => c.id === b.categoryId);
-        const catOrderA = catA?.displayOrder || 999;
-        const catOrderB = catB?.displayOrder || 999;
+        const catOrderA = catA?.displayOrder ?? 999;
+        const catOrderB = catB?.displayOrder ?? 999;
 
         if (catOrderA !== catOrderB) return catOrderA - catOrderB;
-        return (a.displayOrder || 999) - (b.displayOrder || 999);
+        return (a.displayOrder ?? 999) - (b.displayOrder ?? 999);
       })
       : [...items]
         .filter((item) => item.categoryId === activeCategory)
-        .sort((a, b) => (a.displayOrder || 999) - (b.displayOrder || 999));
+        .sort((a, b) => (a.displayOrder ?? 999) - (b.displayOrder ?? 999));
 
   // Build grouped structure for "All Items" view (category → items[])
   const groupedItems = useMemo(() => {
@@ -107,6 +107,7 @@ export function MenuClient({ tableId, categories, items }: MenuClientProps) {
   return (
     <div className="min-h-screen bg-white pb-24 font-sour-gummy">
       <SplashScreen />
+
       {/* Receipt Header */}
       <div className="sticky top-0 z-20 bg-white border-b-2 border-black px-4 py-4">
         <div className="max-w-2xl mx-auto">

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { message } from 'antd';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { orderService } from '@/lib/services/order.service';
@@ -13,8 +13,9 @@ import { OrderTypeSelector } from '@/components/orders/OrderTypeSelector';
 import { CustomerInfoForm } from '@/components/orders/CustomerInfoForm';
 import { PickupTimeSelector } from '@/components/orders/PickupTimeSelector';
 
-export default function AdminCreateOrderPage() {
+export default function CreateOrderPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [orderType, setOrderType] = useState<OrderType>('DINE_IN');
   const [tableId, setTableId] = useState<string>('');
   const [customerName, setCustomerName] = useState('');
@@ -34,6 +35,12 @@ export default function AdminCreateOrderPage() {
   const [searchText, setSearchText] = useState('');
   const [fetchingMenu, setFetchingMenu] = useState(true);
   const [selectedMenuItem, setSelectedMenuItem] = useState<MenuItem | null>(null);
+
+  // Dynamic base path detection
+  const isStaffPath = pathname.startsWith('/staff');
+  const ordersPath = isStaffPath ? '/staff/orders' : (pathname.startsWith('/admin/live-orders') ? '/admin/live-orders' : '/admin/orders');
+  const createdBy = isStaffPath ? 'staff' : 'admin';
+
 
   useEffect(() => {
     fetchMenuData();
@@ -193,7 +200,7 @@ export default function AdminCreateOrderPage() {
         sessionId: orderType === 'DINE_IN' ? `manual-${Date.now()}` : null,
         items,
         entryMethod: 'MANUAL' as const,
-        createdBy: 'admin',
+        createdBy,
         ...(orderType === 'TAKE_AWAY' && {
           customerName: customerName.trim(),
           customerPhone: customerPhone.trim(),
@@ -205,7 +212,7 @@ export default function AdminCreateOrderPage() {
       await orderService.create(orderInput);
 
       message.success('Order created successfully');
-      router.push('/admin/orders');
+      router.push(ordersPath);
     } catch (error) {
       console.error('Error creating order:', error);
       message.error(error instanceof Error ? error.message : 'Failed to create order');
@@ -426,7 +433,7 @@ export default function AdminCreateOrderPage() {
 
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => router.push('/admin/orders')}
+                    onClick={() => router.push(ordersPath)}
                     className="px-4 py-3 border-2 border-black bg-white font-bold text-sm hover:bg-gray-100"
                   >
                     [CANCEL]

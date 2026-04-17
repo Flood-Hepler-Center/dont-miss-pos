@@ -9,6 +9,7 @@ import {
   where,
   orderBy,
   serverTimestamp,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { MenuCategory, MenuItem } from '@/types';
@@ -42,8 +43,8 @@ export const menuService = {
       
       // Sort client-side
       return items.sort((a, b) => {
-        const orderA = a.displayOrder || 999;
-        const orderB = b.displayOrder || 999;
+        const orderA = a.displayOrder ?? 999;
+        const orderB = b.displayOrder ?? 999;
         if (orderA !== orderB) return orderA - orderB;
         return (a.name || '').localeCompare(b.name || '');
       });
@@ -68,8 +69,8 @@ export const menuService = {
       
       // Sort client-side to avoid composite index requirement
       return items.sort((a, b) => {
-        const orderA = a.displayOrder || 999;
-        const orderB = b.displayOrder || 999;
+        const orderA = a.displayOrder ?? 999;
+        const orderB = b.displayOrder ?? 999;
         if (orderA !== orderB) return orderA - orderB;
         return (a.name || '').localeCompare(b.name || '');
       });
@@ -175,7 +176,7 @@ export const menuService = {
       const docRef = doc(collection(db, 'menuItems'));
       await setDoc(docRef, {
         ...data,
-        displayOrder: data.displayOrder || 999,
+        displayOrder: data.displayOrder ?? 999,
         modifiers: data.modifiers || [],
         isActive: true,
         isAvailable: true,
@@ -212,6 +213,49 @@ export const menuService = {
     } catch (error) {
       console.error('Error deleting menu item:', error);
       throw new Error('Failed to delete menu item');
+    }
+  },
+
+  /**
+   * Re-assign displayOrder for a list of categories based on their position
+   * in the provided orderedIds array (index 0 = first). Atomic via writeBatch.
+   */
+  async reorderCategories(orderedIds: string[]): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+      orderedIds.forEach((id, index) => {
+        const ref = doc(db, 'menuCategories', id);
+        batch.update(ref, {
+          displayOrder: index,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    } catch (error) {
+      console.error('Error reordering categories:', error);
+      throw new Error('Failed to reorder categories');
+    }
+  },
+
+  /**
+   * Re-assign displayOrder for a list of menu items based on their position
+   * in the provided orderedIds array (index 0 = first). Atomic via writeBatch.
+   * Typically called with items that all belong to the same category.
+   */
+  async reorderItems(orderedIds: string[]): Promise<void> {
+    try {
+      const batch = writeBatch(db);
+      orderedIds.forEach((id, index) => {
+        const ref = doc(db, 'menuItems', id);
+        batch.update(ref, {
+          displayOrder: index,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    } catch (error) {
+      console.error('Error reordering items:', error);
+      throw new Error('Failed to reorder items');
     }
   },
 };

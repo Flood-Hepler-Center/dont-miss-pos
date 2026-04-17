@@ -9,9 +9,10 @@ import type { MenuCategory } from '@/types';
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reordering, setReordering] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingCategory, setEditingCategory] = useState<MenuCategory | null>(null);
-  const [formData, setFormData] = useState({ name: '', description: '', displayOrder: 0 });
+  const [formData, setFormData] = useState({ name: '', description: '' });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,7 +35,7 @@ export default function CategoriesPage() {
 
   const handleAdd = () => {
     setEditingCategory(null);
-    setFormData({ name: '', description: '', displayOrder: categories.length });
+    setFormData({ name: '', description: '' });
     setModalVisible(true);
   };
 
@@ -43,9 +44,26 @@ export default function CategoriesPage() {
     setFormData({
       name: category.name,
       description: category.description || '',
-      displayOrder: category.displayOrder,
     });
     setModalVisible(true);
+  };
+
+  const handleMove = async (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= categories.length || reordering) return;
+    const next = [...categories];
+    [next[index], next[target]] = [next[target], next[index]];
+    // Optimistic UI update
+    setCategories(next);
+    setReordering(true);
+    try {
+      await menuService.reorderCategories(next.map((c) => c.id));
+    } catch (error) {
+      console.error('Failed to reorder categories:', error);
+      alert('Failed to reorder categories');
+    } finally {
+      setReordering(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -61,16 +79,20 @@ export default function CategoriesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) return;
-    
+
     setLoading(true);
     try {
       if (editingCategory) {
         await menuService.updateCategory(editingCategory.id, formData);
       } else {
-        await menuService.createCategory(formData);
+        // New categories go to the end of the list
+        await menuService.createCategory({
+          ...formData,
+          displayOrder: categories.length,
+        });
       }
       setModalVisible(false);
-      setFormData({ name: '', description: '', displayOrder: 0 });
+      setFormData({ name: '', description: '' });
     } catch (error) {
       console.error('Failed to save category:', error);
       alert('Failed to save category');
@@ -105,23 +127,42 @@ export default function CategoriesPage() {
         {/* Categories List */}
         <div className="border-2 border-black">
           <div className="border-b-2 border-black p-3 bg-white hidden md:block">
-            <div className="grid grid-cols-4 gap-4 text-xs font-bold">
-              <div>NAME</div>
-              <div>DESCRIPTION</div>
-              <div>SORT ORDER</div>
-              <div>ACTIONS</div>
+            <div className="grid grid-cols-12 gap-4 text-xs font-bold">
+              <div className="col-span-1">#</div>
+              <div className="col-span-3">NAME</div>
+              <div className="col-span-4">DESCRIPTION</div>
+              <div className="col-span-2">REORDER</div>
+              <div className="col-span-2">ACTIONS</div>
             </div>
           </div>
-          
+
           <div className="divide-y-2 divide-black">
-            {categories.map((category) => (
+            {categories.map((category, index) => (
               <div key={category.id} className="p-4">
                 {/* Desktop */}
-                <div className="hidden md:grid grid-cols-4 gap-4 text-sm items-center">
-                  <div className="font-bold">{category.name}</div>
-                  <div className="text-xs">{category.description || '-'}</div>
-                  <div>{category.displayOrder}</div>
-                  <div className="flex gap-2">
+                <div className="hidden md:grid grid-cols-12 gap-4 text-sm items-center">
+                  <div className="col-span-1 font-bold">#{index + 1}</div>
+                  <div className="col-span-3 font-bold">{category.name}</div>
+                  <div className="col-span-4 text-xs">{category.description || '-'}</div>
+                  <div className="col-span-2 flex gap-1">
+                    <button
+                      onClick={() => handleMove(index, -1)}
+                      disabled={index === 0 || reordering}
+                      className="px-2 py-1 border border-black text-xs hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title="Move up"
+                    >
+                      [↑]
+                    </button>
+                    <button
+                      onClick={() => handleMove(index, 1)}
+                      disabled={index === categories.length - 1 || reordering}
+                      className="px-2 py-1 border border-black text-xs hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      title="Move down"
+                    >
+                      [↓]
+                    </button>
+                  </div>
+                  <div className="col-span-2 flex gap-2">
                     <button
                       onClick={() => handleEdit(category)}
                       className="px-3 py-1 border border-black text-xs hover:bg-gray-100"
@@ -136,17 +177,36 @@ export default function CategoriesPage() {
                     </button>
                   </div>
                 </div>
-                
+
                 {/* Mobile */}
                 <div className="md:hidden">
-                  <div className="flex justify-between items-start mb-2">
+                  <div className="flex justify-between items-start mb-3">
                     <div>
-                      <p className="font-bold text-sm">{category.name}</p>
+                      <p className="font-bold text-sm">
+                        #{index + 1} {category.name}
+                      </p>
                       <p className="text-xs text-gray-600 mt-1">{category.description || '-'}</p>
                     </div>
-                    <span className="text-xs border border-black px-2 py-1">#{category.displayOrder}</span>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handleMove(index, -1)}
+                        disabled={index === 0 || reordering}
+                        className="px-2 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Move up"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        onClick={() => handleMove(index, 1)}
+                        disabled={index === categories.length - 1 || reordering}
+                        className="px-2 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Move down"
+                      >
+                        ↓
+                      </button>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => handleEdit(category)}
                       className="px-3 py-2 border-2 border-black text-xs font-bold hover:bg-gray-100"
@@ -193,7 +253,7 @@ export default function CategoriesPage() {
                   />
                 </div>
                 
-                <div className="mb-4">
+                <div className="mb-6">
                   <label className="block text-xs font-bold mb-2">DESCRIPTION</label>
                   <textarea
                     value={formData.description}
@@ -201,16 +261,7 @@ export default function CategoriesPage() {
                     className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
                     rows={3}
                   />
-                </div>
-                
-                <div className="mb-6">
-                  <label className="block text-xs font-bold mb-2">DISPLAY ORDER</label>
-                  <input
-                    type="number"
-                    value={formData.displayOrder}
-                    onChange={(e) => setFormData({ ...formData, displayOrder: parseInt(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
-                  />
+                  <p className="text-xs text-gray-600 mt-2">Use the [↑] [↓] buttons in the list to change display order.</p>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-3">

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { doc, getDoc, updateDoc, serverTimestamp, runTransaction, arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { menuService } from '@/lib/services/menu.service';
@@ -16,8 +16,9 @@ interface EditOrderPageProps {
   params: { orderId: string };
 }
 
-export default function AdminEditOrderPage({ params }: EditOrderPageProps) {
+export default function EditOrderPage({ params }: EditOrderPageProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [order, setOrder] = useState<Order | null>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +30,11 @@ export default function AdminEditOrderPage({ params }: EditOrderPageProps) {
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [editingMenuItem, setEditingMenuItem] = useState<MenuItem | null>(null);
   const [addingMenuItem, setAddingMenuItem] = useState<MenuItem | null>(null);
+
+  // Dynamic base path detection
+  const isStaffPath = pathname.startsWith('/staff');
+  const ordersPath = isStaffPath ? '/staff/orders' : '/admin/orders';
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -280,7 +286,7 @@ export default function AdminEditOrderPage({ params }: EditOrderPageProps) {
         updatedAt: serverTimestamp(),
       });
       
-      router.push('/admin/orders');
+      router.push(ordersPath);
     } catch (error) {
       console.error('Error updating order:', error);
       alert('Failed to update order');
