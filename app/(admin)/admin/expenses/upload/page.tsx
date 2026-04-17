@@ -733,11 +733,21 @@ export default function ExpenseUploadPage() {
               </div>
             </div>
           ) : (
-            <div>
+            <div className="relative">
               <div className="border-2 border-black rounded overflow-hidden">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={previewUrl} alt="Receipt preview" className="w-full object-contain max-h-96" />
               </div>
+              
+              {/* Uploading Overlay */}
+              {uploadState === 'uploading' && (
+                <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex flex-col items-center justify-center border-2 border-black rounded">
+                  <Loader2 size={32} className="animate-spin text-black mb-3" />
+                  <p className="text-xs font-bold text-black tracking-widest">UPLOADING TO SERVER...</p>
+                  <p className="text-[10px] text-gray-500 mt-1">Preparing AI pipeline</p>
+                </div>
+              )}
+
               {(uploadState === 'idle' || uploadState === 'error') && (
                 <button onClick={() => { reset(); setPreviewUrl(null); }} className="mt-3 w-full py-2 border-2 border-black text-xs font-bold hover:bg-gray-50">
                   UPLOAD DIFFERENT IMAGE
@@ -800,7 +810,14 @@ export default function ExpenseUploadPage() {
                 {isProcessingCur && (
                   <div className="text-center py-8 text-gray-400">
                     <Loader2 size={24} className="animate-spin mx-auto mb-2" />
-                    <p className="text-xs">Processing in parallel with other receipts...</p>
+                    <p className="text-xs font-bold">
+                      {cur?.status === 'uploading' ? 'UPLOADING RECEIPT...' : 'AI PROCESSING...'}
+                    </p>
+                    <p className="text-[10px] mt-1 text-gray-400">
+                      {cur?.status === 'uploading' 
+                        ? 'Sending image to secure cloud storage' 
+                        : 'Parallel agents are analyzing your receipt'}
+                    </p>
                   </div>
                 )}
 
@@ -847,12 +864,17 @@ export default function ExpenseUploadPage() {
               {/* Progress */}
               <div className="mb-4">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-bold text-gray-500">AI PIPELINE PROGRESS</span>
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">
+                    {uploadState === 'uploading' ? 'IMAGE UPLOAD PROGRESS' : 'AI PIPELINE PROGRESS'}
+                  </span>
                   <span className="text-[10px] font-bold">{progressPercent}%</span>
                 </div>
                 <div className="h-2 bg-gray-100 border border-gray-200">
-                  <div className={`h-full transition-all duration-500 ${uploadState === 'error' ? 'bg-red-500' : isReviewOrDone ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
+                  <div className={`h-full transition-all duration-500 ${uploadState === 'error' ? 'bg-red-500' : isReviewOrDone ? 'bg-green-500' : uploadState === 'uploading' ? 'bg-black' : 'bg-blue-500'}`} style={{ width: `${progressPercent}%` }} />
                 </div>
+                {uploadState === 'uploading' && (
+                  <p className="text-[10px] text-gray-400 mt-1 animate-pulse">Waiting for server response...</p>
+                )}
               </div>
 
               <div className="space-y-1.5 mb-6">
