@@ -391,33 +391,57 @@ function buildInventorySheet(wb: ExcelJS.Workbook, lines: ExpenseLine[], skus: E
 export const expenseExportService = {
   async generateExcel(filter: ExpenseExportFilter): Promise<Buffer> {
     const isSingleDoc = !!filter.documentId;
+    const isMultiDoc = !!filter.documentIds && filter.documentIds.length > 0;
 
-    // 1. Fetch the documents and lines
-    // If single doc, we ignore the date range and category filters
-    const [rawLines, rawDocs, skus] = await Promise.all([
-      expenseLineService.getFiltered({
-        startDate: filter.startDate,
-        endDate: filter.endDate,
-        documentId: filter.documentId,
-      }),
-      expenseDocumentService.getFiltered({
-        startDate: filter.startDate,
-        endDate: filter.endDate,
-        status: filter.status,
-        documentId: filter.documentId,
-      }),
-      expenseSKUService.getAll(),
-    ]);
+    // 1. Fetch the data with strict priority
+    // Priority: Single Doc > Manual Selection (Multi) > Filtered
+    let docs: ExpenseDocument[] = [];
+    let allLines: ExpenseLine[] = [];
 
-    // 2. Data Preparation
-    const docs = rawDocs.filter(d => d.status !== 'cancelled');
+    if (isSingleDoc) {
+      const docId = filter.documentId!;
+      const d = await expenseDocumentService.getById(docId);
+      if (d) {
+        docs = [d];
+        allLines = await expenseLineService.getByDocumentId(docId);
+      }
+    } else if (isMultiDoc) {
+      // Manual selection mode: ignore all other filters
+      const [manualDocs, manualLines] = await Promise.all([
+        expenseDocumentService.getFiltered({ documentIds: filter.documentIds }),
+        expenseLineService.getFiltered({ documentIds: filter.documentIds })
+      ]);
+      docs = manualDocs.filter(d => d.status !== 'cancelled');
+      const validDocIds = new Set(docs.map(d => d.id));
+      allLines = manualLines.filter(l => validDocIds.has(l.documentId));
+    } else {
+      // Standard filtered mode
+      const [rawLines, rawDocs] = await Promise.all([
+        expenseLineService.getFiltered({
+          startDate: filter.startDate,
+          endDate: filter.endDate,
+          mainCategory: filter.mainCategory,
+          skuId: filter.skuId,
+        }),
+        expenseDocumentService.getFiltered({
+          startDate: filter.startDate,
+          endDate: filter.endDate,
+          status: filter.status,
+          mainCategory: filter.mainCategory,
+        }),
+      ]);
+      docs = rawDocs.filter(d => d.status !== 'cancelled');
+      const validDocIds = new Set(docs.map(d => d.id));
+      allLines = rawLines.filter(l => validDocIds.has(l.documentId));
+    }
+
+    const skus = await expenseSKUService.getAll();
     const docMap = new Map(docs.map(d => [d.id, d]));
-    const validDocIds = new Set(docs.map(d => d.id));
-    const allLines = rawLines.filter(l => validDocIds.has(l.documentId));
 
-    // For "Summary" and "Expense Lines" sheets, we respect the user's category/vendor filters
+    // For "Summary" and "Expense Lines" sheets
     let displayLines = [...allLines];
-    if (!isSingleDoc) {
+    if (!isSingleDoc && !isMultiDoc) {
+      // Secondary filter for lines in filtered mode if needed (usually redundant but safe)
       if (filter.mainCategory) displayLines = displayLines.filter(l => l.mainCategory === filter.mainCategory);
       if (filter.subCategory) displayLines = displayLines.filter(l => l.subCategory === filter.subCategory);
       if (filter.vendorId) displayLines = displayLines.filter(l => docMap.get(l.documentId)?.vendorId === filter.vendorId);
@@ -429,13 +453,14 @@ export const expenseExportService = {
     wb.creator = "Don't Miss POS";
     wb.created = new Date();
 
-    // Standard detailed sheets (respect filters)
+    // Standard detailed sheets
     buildSummarySheet(wb, displayLines, filter);
     buildLineItemsSheet(wb, displayLines, docs);
 
-    // Global analysis sheets (always use ALL lines in the date range to keep registers complete)
-    // UNLESS it's a single document export, then we keep it focused
-    const analysisLines = isSingleDoc ? displayLines : allLines;
+    // Global analysis sheets
+    // If it's a specific selection (single or multi), keep them focused on that selection.
+    // Otherwise, use all data in the range to keep registers complete.
+    const analysisLines = (isSingleDoc || isMultiDoc) ? displayLines : allLines;
     buildCAPEXSheet(wb, analysisLines);
     buildInventorySheet(wb, analysisLines, skus);
 

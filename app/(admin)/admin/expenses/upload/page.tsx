@@ -91,12 +91,12 @@ function renderStepSummary(step: AIPipelineStep, result: unknown): string {
 
 // ─── SKU Combobox ───────────────────────────────────────────────────────────
 
-function SKUCombobox({ currentSkuId, currentLabel, skus, onSelect, onClearToNew }: {
+function SKUCombobox({ currentSkuId, currentLabel, skus, onSelect, onSetNewName }: {
   currentSkuId: string | null;
   currentLabel: string;
   skus: ExpenseSKU[];
   onSelect: (sku: ExpenseSKU) => void;
-  onClearToNew: () => void;
+  onSetNewName: (name: string) => void;
 }) {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -110,12 +110,18 @@ function SKUCombobox({ currentSkuId, currentLabel, skus, onSelect, onClearToNew 
     (s.nameTh ?? '').includes(search)
   ).slice(0, 8);
 
+  const isNew = !currentSkuId;
+
   return (
     <div ref={containerRef} className="relative w-full">
       <input
         value={displayValue}
-        onFocus={() => { setSearch(''); setOpen(true); }}
-        onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
+        onFocus={() => { setSearch(isNew ? currentLabel : ''); setOpen(true); }}
+        onChange={(e) => { 
+          setSearch(e.target.value); 
+          setOpen(true);
+          if (isNew) onSetNewName(e.target.value);
+        }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder="Search SKU..."
         className="w-full min-w-32 text-[11px] bg-transparent border-b border-blue-200 focus:border-blue-600 outline-none py-0.5 font-bold truncate"
@@ -124,9 +130,14 @@ function SKUCombobox({ currentSkuId, currentLabel, skus, onSelect, onClearToNew 
         <div className="absolute top-full left-0 z-50 w-72 bg-white border border-gray-200 shadow-xl rounded max-h-48 overflow-y-auto">
           <div
             className="px-2 py-1.5 text-[10px] text-yellow-700 bg-yellow-50 cursor-pointer hover:bg-yellow-100 font-bold border-b border-yellow-200 flex items-center gap-1"
-            onMouseDown={(e) => { e.preventDefault(); onClearToNew(); setOpen(false); setSearch(''); }}
+            onMouseDown={(e) => { 
+              e.preventDefault(); 
+              onSetNewName(search || currentLabel); 
+              setOpen(false); 
+              setSearch(''); 
+            }}
           >
-            <span className="text-yellow-500">★</span> NEW SKU (create on save)
+            <span className="text-yellow-500">★</span> {search ? `USE: "${search}" AS NEW SKU` : 'CREATE AS NEW SKU'}
           </div>
           {filtered.map(sku => (
             <div
@@ -454,10 +465,18 @@ export default function ExpenseUploadPage() {
     });
   }, []);
 
-  const handleLineClearSku = useCallback((idx: number) => {
+  const handleLineSetNew = useCallback((idx: number, name?: string) => {
     setEditableLines(prev => {
       const next = [...prev];
-      next[idx] = { ...next[idx], sku_id: null, sku_code: null, is_new_sku: true, _dirty: true };
+      const current = next[idx];
+      next[idx] = { 
+        ...current, 
+        sku_id: null, 
+        sku_code: null, 
+        is_new_sku: true, 
+        description: name || current.description,
+        _dirty: true 
+      };
       return next;
     });
   }, []);
@@ -593,9 +612,6 @@ export default function ExpenseUploadPage() {
     ? editableLines
     : (activeFinalResult?.lines ?? []).map(l => ({ ...l, _dirty: false } as EditableLine))
   ).filter((l: EditableLine) => !l._deleted);
-
-  // Active file's pipeline steps (for multi mode display)
-  // const activeSteps = activeMultiFile?.pipelineSteps ?? job?.steps ?? [];
 
   // ─── Render ────────────────────────────────────────────────────────────
 
@@ -843,7 +859,7 @@ export default function ExpenseUploadPage() {
                     editableLines={editableLines}
                     handleLineChange={handleLineChange}
                     handleLineSkuSelect={handleLineSkuSelect}
-                    handleLineClearSku={handleLineClearSku}
+                    handleLineSetNew={handleLineSetNew}
                     handleConfirmSave={handleConfirmSave}
                     onDiscard={() => {
                       setEditableLines([]); setSavedId(null); setManualEditMode(false);
@@ -921,7 +937,7 @@ export default function ExpenseUploadPage() {
                   editableLines={editableLines}
                   handleLineChange={handleLineChange}
                   handleLineSkuSelect={handleLineSkuSelect}
-                  handleLineClearSku={handleLineClearSku}
+                  handleLineSetNew={handleLineSetNew}
                   handleConfirmSave={handleConfirmSave}
                   onDiscard={() => { reset(); setPreviewUrl(null); setEditableLines([]); setManualEditMode(false); }}
                 />
@@ -945,7 +961,7 @@ function ReviewTable({
   manualEditMode, manualVendor, manualDate, manualReceiptNo, manualTax, manualServiceCharge,
   setManualVendor, setManualDate, setManualReceiptNo, setManualTax, setManualServiceCharge,
   setManualEditMode, setEditableLines, editableLines,
-  handleLineChange, handleLineSkuSelect, handleLineClearSku,
+  handleLineChange, handleLineSkuSelect, handleLineSetNew,
   handleConfirmSave, onDiscard,
 }: {
   lines: EditableLine[];
@@ -961,7 +977,7 @@ function ReviewTable({
   editableLines: EditableLine[];
   handleLineChange: (idx: number, field: keyof AIFinalLine, value: string | number | boolean) => void;
   handleLineSkuSelect: (idx: number, sku: ExpenseSKU) => void;
-  handleLineClearSku: (idx: number) => void;
+  handleLineSetNew: (idx: number, name?: string) => void;
   handleConfirmSave: () => Promise<void>;
   onDiscard: () => void;
 }) {
@@ -999,7 +1015,7 @@ function ReviewTable({
                     currentLabel={line.description}
                     skus={skus}
                     onSelect={(sku) => handleLineSkuSelect(idx, sku)}
-                    onClearToNew={() => handleLineClearSku(idx)}
+                    onSetNewName={(name) => handleLineSetNew(idx, name)}
                   />
                   {line.sku_code && <span className="text-[9px] font-mono text-gray-400 block mt-0.5">{line.sku_code}</span>}
                 </td>
@@ -1120,7 +1136,7 @@ function ReviewTable({
                         currentLabel={line.description}
                         skus={skus}
                         onSelect={(sku) => handleLineSkuSelect(idx, sku)}
-                        onClearToNew={() => handleLineClearSku(idx)}
+                        onSetNewName={(name) => handleLineSetNew(idx, name)}
                       />
                       {line.sku_code && <span className="text-[9px] font-mono text-blue-400 block">{line.sku_code}</span>}
                     </td>

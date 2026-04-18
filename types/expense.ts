@@ -333,6 +333,7 @@ export type ExpenseExportFilter = {
   skuId?: string;
   status?: ExpenseDocumentStatus;
   documentId?: string;
+  documentIds?: string[];
 };
 
 export type ExpenseExportRow = {
@@ -370,6 +371,7 @@ export type ExpenseFilter = {
   status?: ExpenseDocumentStatus;
   searchText?: string;
   documentId?: string;
+  documentIds?: string[];
 };
 
 export type ExpenseStats = {

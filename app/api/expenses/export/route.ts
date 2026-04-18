@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
       skuId?: string;
       status?: ExpenseExportFilter['status'];
       documentId?: string;
+      documentIds?: string[];
     };
 
     if (!body.startDate || !body.endDate) {
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
       skuId: body.skuId,
       status: body.status,
       documentId: body.documentId,
+      documentIds: body.documentIds,
     };
 
     const buffer = await expenseExportService.generateExcel(filter);

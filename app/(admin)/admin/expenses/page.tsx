@@ -59,6 +59,7 @@ export default function ExpensesPage() {
     endDate: string;
     mainCategory?: string;
     status?: string;
+    documentIds?: string[];
   }) => {
     const res = await fetch('/api/expenses/export', {
       method: 'POST',

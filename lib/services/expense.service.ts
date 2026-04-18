@@ -247,6 +247,20 @@ export const expenseDocumentService = {
       return [fromFirestoreDoc<ExpenseDocument>(snap)];
     }
 
+    // Optimization: If multiple specific IDs are requested, fetch them directly
+    if (filter.documentIds && filter.documentIds.length > 0) {
+      const docIds = filter.documentIds;
+      const docs: ExpenseDocument[] = [];
+      // Chunk into groups of 10 for Firestore 'in' query if needed, 
+      // but simpler to just fetch all by ID if the list is reasonably sized.
+      // We'll use getDoc in a loop for reliability and consistency with fromFirestoreDoc
+      const snaps = await Promise.all(docIds.map(id => getDoc(doc(db, COL.DOCUMENTS, id))));
+      snaps.forEach(snap => {
+        if (snap.exists()) docs.push(fromFirestoreDoc<ExpenseDocument>(snap));
+      });
+      return docs;
+    }
+
     let q = query(collection(db, COL.DOCUMENTS), orderBy('documentDate', 'desc'));
     if (filter.status) {
       q = query(q, where('status', '==', filter.status));
@@ -366,6 +380,22 @@ export const expenseLineService = {
     // Priority filter: If documentId is provided, just get lines for that document
     if (filter.documentId) {
       return this.getByDocumentId(filter.documentId);
+    }
+
+    // Priority filter: If multiple documentIds are provided, fetch lines for all
+    if (filter.documentIds && filter.documentIds.length > 0) {
+      const lines: ExpenseLine[] = [];
+      // We use the documentId filter on lines collection
+      // Firestore 'in' query limited to 10-30 values depending on version
+      // Let's chunk into 10 for safety
+      const ids = filter.documentIds;
+      for (let i = 0; i < ids.length; i += 10) {
+        const chunk = ids.slice(i, i + 10);
+        const q = query(collection(db, COL.LINES), where('documentId', 'in', chunk));
+        const snap = await getDocs(q);
+        lines.push(...snap.docs.map(d => fromFirestoreDoc<ExpenseLine>(d)));
+      }
+      return lines;
     }
 
     let q = query(collection(db, COL.LINES), orderBy('documentDate', 'desc'));

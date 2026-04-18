@@ -1,13 +1,30 @@
 /* eslint-disable no-console */
 /**
- * Expense AI Pipeline Service
+ * Expense AI Pipeline Service — Google Gemini native integration.
  *
- * 5-Step AI Pipeline via OpenRouter:
- *  1. Bill Validator     – gemini-flash-1.5  – is this a valid bill/receipt?
- *  2. Quality Assessor   – gemini-flash-1.5  – image quality / OCR readiness
- *  3. OCR Extractor      – gemini-pro-1.5    – full structured extraction
- *  4. SKU Matcher        – gpt-4o-mini       – match items to SKU catalog
- *  5. Expense Finalizer  – claude-3-haiku    – build final expense record
+ * OPTIMIZED 2-CALL BATCHED PIPELINE (free-tier friendly, $0 on Google AI Studio):
+ *
+ *   BATCH A — Vision call (gemini-2.5-flash): validator + quality + OCR merged
+ *     into one structured JSON response with a strict responseSchema. Native
+ *     Gemini multilingual OCR preserves Thai characters faithfully.
+ *
+ *   BATCH B — Reasoning call (gemini-2.5-flash-lite): SKU matcher + finalizer
+ *     merged into one structured JSON response with a strict responseSchema.
+ *     flash-lite is chosen for lower latency on pure-text reasoning.
+ *
+ * Each batch is claimed atomically via a Firestore transaction so parallel
+ * nudges from the client cannot trigger duplicate API calls.
+ *
+ * Why Gemini over OpenRouter:
+ *   1. responseSchema GUARANTEES the output matches our schema — eliminating
+ *      the "Cannot read properties of undefined (reading 'matches')" class of
+ *      bug completely.
+ *   2. Native Thai support (100+ languages) — no romanization.
+ *   3. Free tier on Google AI Studio is generous (15 RPM + 1000+ RPD) and
+ *      Flash/Flash-Lite share separate rate limit pools by default.
+ *   4. Direct API = no middleware = lower latency.
+ *   5. `thinkingConfig.thinkingBudget = 0` disables Gemini's thinking mode
+ *      for pure speed on structured-output tasks.
  */
 
 import {
@@ -20,7 +37,8 @@ import {
   Timestamp,
   runTransaction,
 } from 'firebase/firestore';
-// import { generateObject } from 'ai';
+import { GoogleGenAI, Type } from '@google/genai';
+import type { GenerateContentResponse, Schema } from '@google/genai';
 import { db } from '@/lib/firebase/config';
 import Fuse from 'fuse.js';
 import type {
@@ -35,21 +53,46 @@ import type {
   ExpenseSKU,
 } from '@/types/expense';
 
-const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
-
+/**
+ * MODEL SELECTION — Google Gemini free-tier models from Google AI Studio.
+ *
+ *   VISION    → gemini-2.5-flash: native multimodal, best OCR quality at free
+ *               tier, multilingual (Thai preserved natively).
+ *   REASONING → gemini-2.5-flash-lite: faster/lighter for text-only structured
+ *               reasoning; uses a SEPARATE free-tier RPM pool from flash so
+ *               they don't compete for quota within the same pipeline run.
+ *
+ * Both models support:
+ *   - responseSchema (guaranteed JSON structure — not best-effort)
+ *   - inlineData image input (base64)
+ *   - thinkingConfig.thinkingBudget=0 (disable thinking for speed)
+ *   - temperature=0 (deterministic)
+ */
 const MODELS = {
-  FAST_VISION: 'google/gemini-2.0-flash-001', // Fast vision for validation
-  PRECISE_VISION: 'google/gemini-3-flash-preview', // Most reliable for JSON + Thai OCR
-  SKU_MATCHER: 'openai/gpt-4o-mini', // Good reasoning at low cost
-  FINALIZER: 'anthropic/claude-3.5-haiku', // Excellent structured output
+  VISION: 'gemini-2.5-flash',
+  REASONING: 'gemini-2.5-flash-lite',
+  /**
+   * Fallback chain: if the primary model hits 429/5xx, try the sibling
+   * model. Both are Google AI Studio endpoints; they share no quota only
+   * if we alternate, so a fallback order like flash → flash-lite effectively
+   * gives us 2× the free tier for vision in worst-case.
+   */
+  VISION_FALLBACKS: ['gemini-2.5-flash-lite', 'gemini-2.0-flash'] as const,
+  REASONING_FALLBACKS: ['gemini-2.5-flash', 'gemini-2.0-flash-lite'] as const,
 } as const;
 
+// ─── Google GenAI client (module-level singleton for connection reuse) ──────
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
+const genAI: GoogleGenAI | null = GEMINI_API_KEY
+  ? new GoogleGenAI({ apiKey: GEMINI_API_KEY })
+  : null;
+
 const STEP_MODELS: Record<AIPipelineStep, string> = {
-  bill_validator: MODELS.FAST_VISION,
-  quality_assessor: MODELS.FAST_VISION,
-  ocr_extractor: MODELS.PRECISE_VISION,
-  sku_matcher: MODELS.SKU_MATCHER,
-  expense_finalizer: MODELS.FINALIZER,
+  bill_validator: MODELS.VISION,
+  quality_assessor: MODELS.VISION,
+  ocr_extractor: MODELS.VISION,
+  sku_matcher: MODELS.REASONING,
+  expense_finalizer: MODELS.REASONING,
 };
 
 const STEP_NUMBERS: Record<AIPipelineStep, 1 | 2 | 3 | 4 | 5> = {
@@ -58,16 +101,6 @@ const STEP_NUMBERS: Record<AIPipelineStep, 1 | 2 | 3 | 4 | 5> = {
   ocr_extractor: 3,
   sku_matcher: 4,
   expense_finalizer: 5,
-};
-
-type OpenRouterMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content:
-  | string
-  | Array<
-    | { type: 'text'; text: string }
-    | { type: 'image_url'; image_url: { url: string } }
-  >;
 };
 
 // ─── JSON Cleanup Helper ──────────────────────────────────────────────────────
@@ -132,52 +165,448 @@ function repairTruncatedJson(json: string): string {
   return repaired;
 }
 
-// ─── OpenRouter Helper ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// ░░░ GOOGLE GEMINI HELPER (primary AI backend) ░░░
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Per-call timeout — abort slow responses and try fallback. */
+const GEMINI_TIMEOUT_MS = 60_000;
+
+type GeminiCallOpts = {
+  /** Must be a strict Gemini responseSchema (use the `Type` enum from @google/genai). */
+  responseSchema: Schema;
+  /** Optional chain of alternate models to try on quota / error failure. */
+  fallbackModels?: readonly string[];
+  /** For reasoning-enabled models — 0 disables thinking for speed (default: 0). */
+  thinkingBudget?: number;
+  maxOutputTokens?: number;
+};
+
+type GeminiInlineImage = {
+  kind: 'image';
+  mimeType: string;
+  /** Base64-encoded image bytes (no data: URL prefix). */
+  data: string;
+};
+
+type GeminiPart = string | GeminiInlineImage;
+
+type GeminiCallResult = {
+  parsed: unknown;
+  inputTokens: number;
+  outputTokens: number;
+  modelUsed: string;
+};
+
+/** Download an image URL and return its base64 + MIME type for inlineData. */
+async function fetchImageAsBase64(
+  imageUrl: string
+): Promise<{ mimeType: string; data: string }> {
+  const res = await fetch(imageUrl);
+  if (!res.ok) throw new Error(`Failed to fetch image (${res.status}) from ${imageUrl}`);
+  const mimeType = res.headers.get('content-type') ?? 'image/jpeg';
+  const arrayBuf = await res.arrayBuffer();
+  const data = Buffer.from(arrayBuf).toString('base64');
+  return { mimeType, data };
+}
+
+/** Build the `contents` array for a single Gemini request. */
+function buildGeminiContents(
+  systemInstruction: string,
+  parts: GeminiPart[]
+): { systemInstruction: string; contents: Array<{ role: 'user'; parts: Array<Record<string, unknown>> }> } {
+  const userParts: Array<Record<string, unknown>> = parts.map((p) => {
+    if (typeof p === 'string') return { text: p };
+    return { inlineData: { mimeType: p.mimeType, data: p.data } };
+  });
+  return {
+    systemInstruction,
+    contents: [{ role: 'user', parts: userParts }],
+  };
+}
+
+/**
+ * Make a Gemini API call with strict responseSchema enforcement.
+ * Falls back through `fallbackModels` on quota (429) / 5xx errors.
+ * Returns the parsed JSON object directly — no secondary JSON.parse needed
+ * because responseSchema GUARANTEES the model output matches the schema.
+ */
+async function callGemini(
+  primaryModel: string,
+  systemInstruction: string,
+  parts: GeminiPart[],
+  opts: GeminiCallOpts
+): Promise<GeminiCallResult> {
+  if (!genAI) {
+    throw new Error(
+      'GEMINI_API_KEY (or GOOGLE_API_KEY) env var is not set. ' +
+        'Get a free key at https://aistudio.google.com/app/apikey.'
+    );
+  }
+
+  // Dedupe primary + fallbacks, preserve order.
+  const seen = new Set<string>();
+  const chain: string[] = [];
+  for (const m of [primaryModel, ...(opts.fallbackModels ?? [])]) {
+    if (!seen.has(m)) {
+      seen.add(m);
+      chain.push(m);
+    }
+  }
+
+  const { systemInstruction: sys, contents } = buildGeminiContents(systemInstruction, parts);
+
+  let lastError = '';
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i];
+    if (i > 0) console.log(`[Gemini] → fallback attempt ${i + 1}/${chain.length}: ${model}`);
+
+    // Race the API call against a timeout using AbortController's abortSignal.
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+
+    try {
+      const response: GenerateContentResponse = await genAI.models.generateContent({
+        model,
+        contents,
+        config: {
+          systemInstruction: sys,
+          responseMimeType: 'application/json',
+          responseSchema: opts.responseSchema,
+          temperature: 0,
+          maxOutputTokens: opts.maxOutputTokens,
+          thinkingConfig: { thinkingBudget: opts.thinkingBudget ?? 0 },
+          abortSignal: controller.signal,
+        },
+      });
+      clearTimeout(timeoutHandle);
+
+      const text = response.text ?? '';
+      if (!text.trim()) {
+        lastError = `Empty response from ${model}`;
+        console.warn(`[Gemini] ${model} returned empty text — trying next model`);
+        continue;
+      }
+
+      // responseSchema makes this JSON.parse near-guaranteed to succeed.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        // Extremely rare with responseSchema, but keep a repair fallback.
+        try {
+          parsed = JSON.parse(repairTruncatedJson(cleanJsonResponse(text)));
+        } catch (err) {
+          lastError = `JSON parse failed: ${(err as Error).message}`;
+          console.warn(`[Gemini] ${model} returned invalid JSON — trying next model`);
+          console.warn(`  preview: ${text.substring(0, 200)}`);
+          continue;
+        }
+      }
+
+      const usage = response.usageMetadata;
+      return {
+        parsed,
+        inputTokens: usage?.promptTokenCount ?? 0,
+        outputTokens: usage?.candidatesTokenCount ?? 0,
+        modelUsed: model,
+      };
+    } catch (e) {
+      clearTimeout(timeoutHandle);
+      const err = e as Error & { status?: number; code?: number };
+      const msg = err.message ?? String(err);
+      const status = err.status ?? err.code ?? 0;
+      lastError = `${model}: ${msg} (status=${status})`;
+
+      // Retryable: quota (429), service unavailable (5xx), timeout.
+      const retryable = status === 429 || (status >= 500 && status < 600) || err.name === 'AbortError';
+      if (retryable) {
+        console.warn(`[Gemini] ${model} failed (${status || err.name}) — trying next model`);
+        continue;
+      }
+      // Non-retryable (bad schema, auth, invalid key) — stop immediately.
+      console.error(`[Gemini] ${model} non-retryable error:`, msg);
+      throw new Error(`Gemini error: ${msg}`);
+    }
+  }
+
+  throw new Error(`Gemini: all ${chain.length} models exhausted. Last error: ${lastError}`);
+}
+
+// ─── OpenRouter Helper — DEPRECATED (unused after Gemini migration) ───────────
+// The code below is dead code preserved for git-blame context. It will be
+// removed in a follow-up cleanup. Only callGemini (above) is used in
+// production. Minimal shims ensure the file compiles.
+
+const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
+type OpenRouterMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content:
+    | string
+    | Array<
+        | { type: 'text'; text: string }
+        | { type: 'image_url'; image_url: { url: string } }
+      >;
+};
+
+type CallOpts = {
+  maxTokens?: number;
+  temperature?: number;
+  /** For reasoning-enabled models (e.g. gpt-oss, glm-air) — "low"/"medium"/"high". Omit to use default. */
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  /**
+   * Explicit fallback chain. When provided, models are tried IN ORDER as
+   * separate single-model API calls. On 429/503 (rate-limit / upstream down)
+   * we skip to the next model IMMEDIATELY without delay — since each entry
+   * uses a different upstream provider, its pool is independent.
+   *
+   * The primary `model` argument is treated as the first attempt and does not
+   * need to be repeated in fallbackModels.
+   */
+  fallbackModels?: readonly string[];
+};
+
+const CHAIN_RETRY_DELAY_MS = 2000;
+/** Per-attempt timeout — abort slow/queued free-tier calls and fail over fast. */
+const PER_ATTEMPT_TIMEOUT_MS = 45_000;
+
+type OpenRouterResponse = {
+  choices?: Array<{ message?: { content?: string } }>;
+  usage?: { prompt_tokens: number; completion_tokens: number };
+  model?: string;
+  error?: { message?: string; code?: number };
+};
+
+type CallResult = {
+  content: string;
+  inputTokens: number;
+  outputTokens: number;
+  modelUsed: string;
+};
+
+/** Build the request body for a SINGLE model attempt. */
+function buildBody(
+  model: string,
+  messages: OpenRouterMessage[],
+  jsonMode: boolean,
+  opts: CallOpts
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    temperature: opts.temperature ?? 0.1,
+    max_tokens: opts.maxTokens ?? 8192,
+  };
+  if (jsonMode) body.response_format = { type: 'json_object' };
+  if (opts.reasoningEffort) {
+    // effort controls how much reasoning; exclude=true hides reasoning from content
+    // so thinking-mode models (GLM, Nemotron) don't leak chain-of-thought as prose.
+    body.reasoning = { effort: opts.reasoningEffort, exclude: true };
+  } else if (jsonMode) {
+    // For non-reasoning-aware callers that still need JSON, explicitly disable
+    // reasoning so any model that silently enables it won't leak prose.
+    body.reasoning = { enabled: false, exclude: true };
+  }
+  return body;
+}
+
+/**
+ * Quick sanity check: does `content` look like valid JSON?
+ * Handles markdown fences and partial trailing garbage. Returns true iff
+ * JSON.parse succeeds on the cleaned content OR on the longest JSON-looking
+ * prefix. This lets us reject prose responses from models that ignore JSON
+ * mode (e.g. NVIDIA reasoning models) BEFORE wasting further processing.
+ */
+function looksLikeJson(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  // Fast path: if it starts with a non-JSON character, reject immediately.
+  const first = trimmed[0];
+  if (first !== '{' && first !== '[' && first !== '"' && first !== '`') return false;
+
+  // Strip common markdown fences before parsing.
+  let cleaned = trimmed;
+  if (cleaned.startsWith('```json')) cleaned = cleaned.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+  else if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```\n?/, '').replace(/\n?```$/, '');
+
+  try {
+    JSON.parse(cleaned);
+    return true;
+  } catch {
+    // Maybe truncated — try the repair heuristic used elsewhere.
+    try {
+      JSON.parse(repairTruncatedJson(cleaned));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/**
+ * Try a single model. Returns the result on success, or { retryable, error }
+ * describing the failure so the caller can decide whether to advance the chain.
+ *
+ * Wraps the fetch in an AbortController with PER_ATTEMPT_TIMEOUT_MS so a
+ * hung/queued free-tier model cannot stall the whole pipeline — we abort
+ * and fall through to the next fallback immediately.
+ */
+async function tryModel(
+  model: string,
+  messages: OpenRouterMessage[],
+  jsonMode: boolean,
+  opts: CallOpts,
+  apiKey: string
+): Promise<
+  | { ok: true; result: CallResult }
+  | { ok: false; retryable: boolean; status: number; error: string }
+> {
+  const body = buildBody(model, messages, jsonMode, opts);
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), PER_ATTEMPT_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(OPENROUTER_BASE, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
+        'X-Title': 'DontMiss POS - Expense AI',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    clearTimeout(timeoutHandle);
+    const aborted = (e as Error)?.name === 'AbortError';
+    return {
+      ok: false,
+      retryable: true, // both timeouts and network errors are worth a fallback
+      status: aborted ? 408 : 0,
+      error: aborted ? `timeout after ${PER_ATTEMPT_TIMEOUT_MS}ms` : (e as Error).message,
+    };
+  }
+  clearTimeout(timeoutHandle);
+
+  // ── HTTP-level failure ──
+  if (!res.ok) {
+    const error = await res.text();
+    const retryable = res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504;
+    return { ok: false, retryable, status: res.status, error };
+  }
+
+  // ── HTTP 200 but still possibly shape-invalid ──
+  let data: OpenRouterResponse;
+  try {
+    data = (await res.json()) as OpenRouterResponse;
+  } catch (e) {
+    return {
+      ok: false,
+      retryable: true,
+      status: 200,
+      error: `Invalid JSON body: ${(e as Error).message}`,
+    };
+  }
+
+  // Some providers return HTTP 200 with an `error` field instead of `choices`.
+  if (data.error) {
+    const msg = data.error.message ?? 'Unknown upstream error';
+    const code = data.error.code ?? 0;
+    const retryable = code === 429 || code === 502 || code === 503;
+    return { ok: false, retryable, status: code || 200, error: msg };
+  }
+
+  const first = Array.isArray(data.choices) ? data.choices[0] : undefined;
+  const content = first?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    return {
+      ok: false,
+      retryable: true,
+      status: 200,
+      error: `Empty/missing content. Got keys: ${Object.keys(data).join(', ')}`,
+    };
+  }
+
+  // When JSON mode is requested, verify the model actually returned JSON.
+  // Some reasoning-first models (e.g. NVIDIA Nemotron) ignore response_format
+  // and return raw chain-of-thought prose. Reject those early so the chain
+  // can advance to a JSON-compliant model instead of accepting garbage.
+  if (jsonMode && !looksLikeJson(content)) {
+    return {
+      ok: false,
+      retryable: true,
+      status: 200,
+      error: `Model returned non-JSON content (JSON mode ignored). Preview: ${content.substring(0, 120).replace(/\s+/g, ' ')}…`,
+    };
+  }
+
+  return {
+    ok: true,
+    result: {
+      content,
+      inputTokens: data.usage?.prompt_tokens ?? 0,
+      outputTokens: data.usage?.completion_tokens ?? 0,
+      modelUsed: data.model ?? model,
+    },
+  };
+}
 
 async function callOpenRouter(
   model: string,
   messages: OpenRouterMessage[],
-  jsonMode = true
-): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
+  jsonMode = true,
+  opts: CallOpts = {}
+): Promise<CallResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
 
-  const body: Record<string, unknown> = {
-    model,
-    messages,
-    temperature: 0.1,
-    max_tokens: 8192, // Increased for complex receipts with Thai text
-  };
-  if (jsonMode) {
-    body.response_format = { type: 'json_object' };
+  // Build full chain with primary first, dedup while preserving order.
+  const seen = new Set<string>();
+  const chain: string[] = [];
+  for (const m of [model, ...(opts.fallbackModels ?? [])]) {
+    if (!seen.has(m)) {
+      seen.add(m);
+      chain.push(m);
+    }
   }
 
-  const res = await fetch(OPENROUTER_BASE, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
-      'X-Title': 'DontMiss POS - Expense AI',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  const walkChain = async (): Promise<CallResult | { failed: true; status: number; error: string }> => {
+    let lastStatus = 0;
+    let lastError = '';
+    for (let i = 0; i < chain.length; i++) {
+      const candidate = chain[i];
+      if (i > 0) console.log(`[OpenRouter] → fallback attempt ${i + 1}/${chain.length}: ${candidate}`);
+      const outcome = await tryModel(candidate, messages, jsonMode, opts, apiKey);
+      if (outcome.ok) return outcome.result;
+      lastStatus = outcome.status;
+      lastError = outcome.error;
+      if (!outcome.retryable) {
+        // Non-retryable (auth, bad request, etc.) → stop immediately.
+        break;
+      }
+      console.warn(`[OpenRouter] ${candidate} returned ${outcome.status} — trying next model`);
+    }
+    return { failed: true, status: lastStatus, error: lastError };
+  };
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`OpenRouter error ${res.status}: ${err}`);
+  // Walk chain; if the entire chain failed with retryable errors, wait and retry ONCE.
+  let result = await walkChain();
+  if ('failed' in result && result.status === 429) {
+    console.warn(
+      `[OpenRouter] Full chain (${chain.length} models) rate-limited. Waiting ${CHAIN_RETRY_DELAY_MS}ms and retrying once.`
+    );
+    await new Promise((r) => setTimeout(r, CHAIN_RETRY_DELAY_MS));
+    result = await walkChain();
   }
 
-  const data = await res.json() as {
-    choices: Array<{ message: { content: string } }>;
-    usage?: { prompt_tokens: number; completion_tokens: number };
-  };
-
-  return {
-    content: data.choices[0]?.message?.content ?? '{}',
-    inputTokens: data.usage?.prompt_tokens ?? 0,
-    outputTokens: data.usage?.completion_tokens ?? 0,
-  };
+  if ('failed' in result) {
+    throw new Error(
+      `OpenRouter error ${result.status} (all ${chain.length} models exhausted): ${result.error}`
+    );
+  }
+  return result;
 }
 
 // ─── Job Management ───────────────────────────────────────────────────────────
@@ -245,7 +674,7 @@ export async function runBillValidator(
 Respond with JSON matching this exact schema:
 {
   "is_valid_document": boolean,
-  "document_type": "receipt" | "invoice" | "quotation" | "delivery_note" | "other",
+  "document_type": "receipt" | "invoice" | "quotation" | "delivery_note" | "bank_transfer_slip" | "other",
   "confidence": number between 0 and 1,
   "rejection_reason": string or null,
   "detected_language": "th" | "en" | "mixed" | "other",
@@ -256,7 +685,7 @@ Respond with JSON matching this exact schema:
     },
   ];
 
-  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.FAST_VISION, messages);
+  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.VISION, messages);
   const result = JSON.parse(content) as AIBillValidatorResult;
   const completedAt = new Date();
   await updateJobStep(jobId, 'bill_validator', {
@@ -305,7 +734,7 @@ Respond with JSON matching this exact schema:
     },
   ];
 
-  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.FAST_VISION, messages);
+  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.VISION, messages);
   const result = JSON.parse(content) as AIQualityResult;
   const completedAt = new Date();
   await updateJobStep(jobId, 'quality_assessor', {
@@ -347,6 +776,17 @@ MONETARY & TAX HANDLING (THAI CONTEXT):
 - CRITICAL: Grand Total is the final amount paid.
 - FORMULA: Total = Subtotal + Tax + Service Charge.
 - VAT INCLUSIVE: If the receipt says "VAT Included" or "รวมภาษีแล้ว", the Total is the printed total, and you should extract the tax amount if shown, but DO NOT subtract it from the subtotal in a way that changes the Grand Total.
+
+BANK TRANSFER SLIP HANDLING:
+- If the image is a Thai Bank Transfer Slip (e.g., K-Plus, SCB Easy, PromptPay), extract the following:
+- "Vendor Name" = The recipient of the transfer (e.g., "Mr. Somchai", "Tops Supermarket").
+- "Total" = The transfer amount.
+- Create ONE line item in "line_items" representing the transfer.
+- "line_items[0].description" = "Bank Transfer to [Recipient Name]".
+- "line_items[0].quantity" = 1.
+- "line_items[0].unit" = "unit".
+- "line_items[0].unit_price" = transfer amount.
+- "line_items[0].subtotal" = transfer amount.
 Extract ALL information precisely maintaining original language (Thai, English, or mixed).
 All monetary values should be numbers (no currency symbols).
 Respond with valid JSON only.`,
@@ -364,6 +804,10 @@ DATE EXTRACTION:
 - Ensure the extracted "date" is in YYYY-MM-DD format (Christian Era).
 - If the year is missing but a date like "15 Apr" is present, assume the current year (2026).
 - If a Buddhist year is present (e.g., 2569 or 69), convert it to CE (2026).
+
+BANK TRANSFER SLIP SPECIAL RULES:
+- If it is a bank transfer slip, extract the recipient name from the "To" (ไปยัง) field as the vendor name.
+- If it is a bank transfer slip, create exactly one line item in "line_items" with the total amount.
 
 TAX & TOTAL EXTRACTION:
 - Identify "Subtotal" (before tax), "Tax" (VAT), and "Grand Total".
@@ -413,7 +857,7 @@ Respond with JSON matching this exact schema:
     },
   ];
 
-  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.PRECISE_VISION, messages);
+  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.VISION, messages);
 
   // Clean and parse JSON with error handling
   const cleanedContent = cleanJsonResponse(content);
@@ -640,7 +1084,7 @@ Respond with JSON:
     },
   ];
 
-  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.SKU_MATCHER, messages, true);
+  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.REASONING, messages, true);
   const result = JSON.parse(content) as AISKUMatcherResult;
 
   // --- POST-PROCESS: ENSURE CONSISTENCY FOR GROUPED ITEMS ---
@@ -775,13 +1219,19 @@ UNIT CONVERSION RULES:
 - purchase_unit=g, base_unit=g → base_qty = purchase_qty
 - otherwise use the suggested_conversion_factor from SKU matcher
 
+BANK TRANSFER SLIP HANDLING:
+- If the document is a bank transfer slip, expense_type is likely "operating" or "other".
+- Set requires_review = true for all bank transfer slips to ensure the category is correct.
+
 Determine the expense_type:
 - "capex" if majority of items are equipment/decor/furniture
 - "inventory" if majority are food/drinks
 - "operating" if operating expenses
+- "utility" if utility bills
 - "mixed" if multiple categories
 
 Mark requires_review=true if:
+- Document is a "bank_transfer_slip"
 - Any match confidence < 0.7
 - Total calculated differs from OCR total by >5%
 - Date is ambiguous or missing
@@ -825,7 +1275,7 @@ Respond with JSON:
     },
   ];
 
-  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.FINALIZER, messages, true);
+  const { content, inputTokens, outputTokens } = await callOpenRouter(MODELS.REASONING, messages, true);
   const result = JSON.parse(content) as AIExpenseFinalizerResult;
 
   // --- POST-PROCESS: MERGE DUPLICATE NEW-SKU LINES ---
@@ -883,6 +1333,749 @@ Respond with JSON:
   return result;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ░░░ OPTIMIZED BATCHED PIPELINE (2 API calls instead of 5) ░░░
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The pipeline is still reported to the UI as 5 discrete steps, but these
+// two functions perform the actual OpenRouter requests: one vision call that
+// produces validator+quality+OCR results together, and one reasoning call
+// that produces SKU matches + finalized expense record together.
+
+const BATCH_A: AIPipelineStep[] = ['bill_validator', 'quality_assessor', 'ocr_extractor'];
+const BATCH_B: AIPipelineStep[] = ['sku_matcher', 'expense_finalizer'];
+
+// Proportional splits so UI duration/token display remains informative.
+// Tokens are attributed mostly to OCR / finalizer which do the heavy work.
+const BATCH_A_WEIGHTS = { bill_validator: 0.05, quality_assessor: 0.05, ocr_extractor: 0.9 } as const;
+const BATCH_B_WEIGHTS = { sku_matcher: 0.3, expense_finalizer: 0.7 } as const;
+
+type BatchClaim = {
+  claimed: boolean;
+  imageUrl: string;
+  steps: AIPipelineStepResult[];
+};
+
+/**
+ * Atomically claim a batch of steps by marking all currently-pending members
+ * as "running". Returns `claimed: false` if any step in the batch is already
+ * running or done — meaning another caller already owns the batch.
+ */
+async function claimBatch(jobId: string, batch: AIPipelineStep[]): Promise<BatchClaim> {
+  const jobRef = doc(db, JOBS_COL, jobId);
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(jobRef);
+    if (!snap.exists()) throw new Error('Job not found');
+    const data = snap.data();
+    const steps = [...((data.steps as AIPipelineStepResult[]) ?? [])];
+
+    // If ANY step in the batch is already running/done, another caller owns it
+    const alreadyOwned = batch.some((s) => {
+      const rec = steps.find((x) => x.step === s);
+      return rec?.status === 'running' || rec?.status === 'done';
+    });
+    if (alreadyOwned) {
+      return { claimed: false, imageUrl: data.imageUrl as string, steps };
+    }
+
+    const now = new Date();
+    for (const stepName of batch) {
+      const idx = steps.findIndex((x) => x.step === stepName);
+      if (idx >= 0) {
+        steps[idx] = {
+          ...steps[idx],
+          status: 'running',
+          startedAt: now,
+          updatedAt: now,
+        };
+      }
+    }
+
+    const updates: Record<string, unknown> = {
+      steps,
+      currentStep: batch[0],
+      updatedAt: serverTimestamp(),
+    };
+    if (data.overallStatus === 'pending') updates.overallStatus = 'running';
+
+    tx.update(jobRef, updates);
+    return { claimed: true, imageUrl: data.imageUrl as string, steps };
+  });
+}
+
+/**
+ * Atomically mark all steps in a batch as done and attach their individual
+ * `result` payloads, plus split duration/tokens proportionally so the UI
+ * continues to show per-step progress and cost.
+ */
+async function completeBatch(
+  jobId: string,
+  batch: AIPipelineStep[],
+  stepResults: Record<string, unknown>,
+  totalDurationMs: number,
+  inputTokens: number,
+  outputTokens: number,
+  weights: Record<string, number>,
+  options: { skippedSteps?: AIPipelineStep[]; finalResult?: AIExpenseFinalizerResult } = {}
+): Promise<void> {
+  const jobRef = doc(db, JOBS_COL, jobId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(jobRef);
+    if (!snap.exists()) return;
+    const data = snap.data();
+    const steps = [...((data.steps as AIPipelineStepResult[]) ?? [])];
+    const completedAt = new Date();
+
+    for (const stepName of batch) {
+      const idx = steps.findIndex((x) => x.step === stepName);
+      if (idx < 0) continue;
+      const isSkipped = options.skippedSteps?.includes(stepName);
+      const w = weights[stepName] ?? 1 / batch.length;
+      steps[idx] = {
+        ...steps[idx],
+        status: isSkipped ? 'skipped' : 'done',
+        completedAt,
+        durationMs: Math.round(totalDurationMs * w),
+        inputTokens: Math.round(inputTokens * w),
+        outputTokens: Math.round(outputTokens * w),
+        result: stepResults[stepName],
+        updatedAt: completedAt,
+      };
+    }
+
+    const updates: Record<string, unknown> = {
+      steps,
+      currentStep: batch[batch.length - 1],
+      updatedAt: serverTimestamp(),
+    };
+    if (options.finalResult) {
+      updates.finalResult = options.finalResult;
+      updates.overallStatus = options.finalResult.requires_review ? 'needs_review' : 'completed';
+      updates.totalDurationMs = steps.reduce((sum, s) => sum + (s.durationMs ?? 0), 0);
+    }
+
+    tx.update(jobRef, updates);
+  });
+}
+
+// ─── BATCH A: Vision Analyzer (validator + quality + OCR in 1 call) ─────────
+
+type MergedVisionResponse = {
+  validation: AIBillValidatorResult;
+  quality: AIQualityResult;
+  ocr: AIOCRResult | null;
+};
+
+/**
+ * Resilient normaliser: models sometimes return keys with different casing or
+ * alternate names (e.g. `billValidation`, `quality_check`, `extracted`).
+ * Map whatever shape arrived into our canonical MergedVisionResponse.
+ */
+function normaliseVisionShape(raw: unknown): MergedVisionResponse {
+  const r = (raw ?? {}) as Record<string, unknown>;
+
+  const validation = (r.validation ?? r.bill_validation ?? r.billValidation ?? r.valid ?? {}) as Record<string, unknown>;
+  const quality = (r.quality ?? r.quality_assessment ?? r.qualityAssessment ?? r.image_quality ?? {}) as Record<string, unknown>;
+  const ocr = (r.ocr ?? r.ocr_result ?? r.extraction ?? r.extracted ?? r.receipt ?? null) as Record<string, unknown> | null;
+
+  return {
+    validation: {
+      is_valid_document: Boolean(validation.is_valid_document ?? validation.isValid ?? validation.valid ?? true),
+      document_type: (validation.document_type ?? validation.type ?? 'receipt') as AIBillValidatorResult['document_type'],
+      confidence: Number(validation.confidence ?? 0.8),
+      rejection_reason: (validation.rejection_reason ?? validation.reason ?? null) as string | null,
+      detected_language: (validation.detected_language ?? validation.language ?? 'en') as AIBillValidatorResult['detected_language'],
+      visible_merchant: (validation.visible_merchant ?? validation.merchant ?? null) as string | null,
+    },
+    quality: {
+      overall_quality: (quality.overall_quality ?? quality.quality ?? 'good') as AIQualityResult['overall_quality'],
+      ocr_confidence: Number(quality.ocr_confidence ?? quality.confidence ?? 0.85),
+      issues: Array.isArray(quality.issues) ? (quality.issues as string[]) : [],
+      text_visibility: (quality.text_visibility ?? quality.visibility ?? 'clear') as AIQualityResult['text_visibility'],
+      recommended_action: (quality.recommended_action ?? quality.action ?? 'proceed') as AIQualityResult['recommended_action'],
+    },
+    ocr: ocr ? (ocr as unknown as AIOCRResult) : null,
+  };
+}
+
+/**
+ * Strict Gemini responseSchema for Batch A (validator + quality + OCR).
+ * Gemini GUARANTEES the output matches this shape — no more "undefined .matches" bugs.
+ */
+const VISION_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    validation: {
+      type: Type.OBJECT,
+      properties: {
+        is_valid_document: { type: Type.BOOLEAN },
+        document_type: {
+          type: Type.STRING,
+          enum: ['receipt', 'invoice', 'quotation', 'delivery_note', 'bank_transfer_slip', 'other'],
+        },
+        confidence: { type: Type.NUMBER },
+        rejection_reason: { type: Type.STRING, nullable: true },
+        detected_language: { type: Type.STRING, enum: ['th', 'en', 'mixed', 'other'] },
+        visible_merchant: { type: Type.STRING, nullable: true },
+      },
+      required: ['is_valid_document', 'document_type', 'confidence', 'detected_language'],
+    },
+    quality: {
+      type: Type.OBJECT,
+      properties: {
+        overall_quality: { type: Type.STRING, enum: ['excellent', 'good', 'acceptable', 'poor'] },
+        ocr_confidence: { type: Type.NUMBER },
+        issues: { type: Type.ARRAY, items: { type: Type.STRING } },
+        text_visibility: { type: Type.STRING, enum: ['clear', 'partially_visible', 'blurry', 'cut_off'] },
+        recommended_action: { type: Type.STRING, enum: ['proceed', 'warn_and_proceed', 'request_better_image'] },
+      },
+      required: ['overall_quality', 'ocr_confidence', 'recommended_action'],
+    },
+    ocr: {
+      type: Type.OBJECT,
+      nullable: true,
+      properties: {
+        vendor: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            address: { type: Type.STRING, nullable: true },
+            phone: { type: Type.STRING, nullable: true },
+            tax_id: { type: Type.STRING, nullable: true },
+          },
+          required: ['name'],
+        },
+        date: { type: Type.STRING, nullable: true },
+        time: { type: Type.STRING, nullable: true },
+        receipt_number: { type: Type.STRING, nullable: true },
+        currency: { type: Type.STRING },
+        line_items: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              raw_text: { type: Type.STRING },
+              description: { type: Type.STRING },
+              quantity: { type: Type.NUMBER },
+              unit: { type: Type.STRING },
+              unit_price: { type: Type.NUMBER },
+              subtotal: { type: Type.NUMBER },
+              discount: { type: Type.NUMBER, nullable: true },
+            },
+            required: ['description', 'quantity', 'unit_price', 'subtotal'],
+          },
+        },
+        subtotal: { type: Type.NUMBER },
+        tax: { type: Type.NUMBER, nullable: true },
+        service_charge: { type: Type.NUMBER, nullable: true },
+        total: { type: Type.NUMBER },
+        payment_method: { type: Type.STRING, nullable: true },
+        notes: { type: Type.STRING, nullable: true },
+      },
+      required: ['vendor', 'line_items', 'subtotal', 'total'],
+    },
+  },
+  required: ['validation', 'quality'],
+};
+
+export async function runVisionAnalyzer(
+  jobId: string,
+  imageUrl: string
+): Promise<MergedVisionResponse> {
+  const startedAt = Date.now();
+  const today = new Date().toLocaleDateString('en-GB');
+  const currentYear = new Date().getFullYear();
+
+  const systemInstruction = `You are a receipt analyst for a Thai restaurant expense system. You perform 3 tasks in one structured JSON response.
+
+1. validation: classify the document + decide if valid (receipt/invoice/bank slip). If NOT valid, set ocr=null.
+2. quality: grade image for OCR readiness.
+3. ocr: extract every field.
+
+★★★ CRITICAL LANGUAGE PRESERVATION ★★★
+Preserve ALL text EXACTLY as printed — in its ORIGINAL script.
+- If the receipt shows Thai characters, KEEP Thai characters in your output.
+- DO NOT transliterate/romanize Thai to Latin letters.
+- DO NOT translate Thai to English.
+- Examples (WRONG → CORRECT):
+    "CP Astra PCL" → "บริษัท ซีพี ออลล์ จำกัด (มหาชน)"
+    "Pad Thai"     → "ผัดไทย"
+    "Fried Pork Rice" → "ข้าวหมูทอด"
+Only use the language actually printed. If mixed, preserve the mix.
+
+Rules:
+- Dates: return YYYY-MM-DD in CE. Buddhist Era (BE) − 543 = CE. Short years '69/'68/'67 on Thai receipts are BE (2569/2568/2567 → 2026/2025/2024). Today=${today}, assume year=${currentYear} if missing.
+- Totals: Total = Subtotal + Tax + ServiceCharge. If printed Grand Total disagrees, trust the printed Grand Total.
+- VAT 7% = "ภาษีมูลค่าเพิ่ม"/"VAT". Service 10% = "ค่าบริการ"/"Service".
+- Bank transfer slip: vendor=recipient, create ONE line "Bank Transfer to [Recipient]" with quantity=1, unit="unit", unit_price=total, subtotal=total.
+
+Set ocr=null ONLY when validation.is_valid_document=false.`;
+
+  // Fetch image and convert to base64 for Gemini inlineData
+  const { mimeType, data } = await fetchImageAsBase64(imageUrl);
+
+  const userText = 'Analyze this receipt image and return the structured JSON response.';
+
+  const { parsed: rawParsed, inputTokens, outputTokens, modelUsed } = await callGemini(
+    MODELS.VISION,
+    systemInstruction,
+    [userText, { kind: 'image', mimeType, data }],
+    {
+      responseSchema: VISION_SCHEMA,
+      fallbackModels: MODELS.VISION_FALLBACKS,
+      maxOutputTokens: 3500,
+      thinkingBudget: 0,
+    }
+  );
+
+  // responseSchema guarantees shape, but normaliseVisionShape is cheap defence.
+  const parsed: MergedVisionResponse = normaliseVisionShape(rawParsed);
+
+  if (modelUsed !== MODELS.VISION) {
+    console.log(`[VISION ANALYZER] served by fallback: ${modelUsed}`);
+  }
+
+  // Safety: if OCR missing but document is valid, surface the issue clearly.
+  if (parsed.validation.is_valid_document && !parsed.ocr) {
+    console.warn('[VISION ANALYZER] Document valid but ocr=null — treating as invalid');
+    parsed.validation.is_valid_document = false;
+    parsed.validation.rejection_reason = parsed.validation.rejection_reason ?? 'OCR extraction failed';
+  }
+
+  // ━━━ LOGGING ━━━
+  console.log('\n[BATCH A] Vision analyzer done');
+  console.log(
+    `  validation: ${parsed.validation.document_type} (valid=${parsed.validation.is_valid_document}, conf=${(
+      parsed.validation.confidence * 100
+    ).toFixed(0)}%)`
+  );
+  console.log(
+    `  quality: ${parsed.quality.overall_quality} (ocr_conf=${(parsed.quality.ocr_confidence * 100).toFixed(0)}%, action=${parsed.quality.recommended_action})`
+  );
+  if (parsed.ocr) {
+    console.log(
+      `  ocr: vendor="${parsed.ocr.vendor?.name ?? 'n/a'}" items=${parsed.ocr.line_items?.length ?? 0} total=฿${parsed.ocr.total ?? 0}`
+    );
+  }
+
+  const totalDurationMs = Date.now() - startedAt;
+
+  // Decide which steps to mark skipped vs done for correct UI display
+  const skipped: AIPipelineStep[] = [];
+  if (!parsed.validation.is_valid_document) {
+    skipped.push('quality_assessor', 'ocr_extractor');
+  } else if (parsed.quality.recommended_action === 'request_better_image') {
+    skipped.push('ocr_extractor');
+  }
+
+  await completeBatch(
+    jobId,
+    BATCH_A,
+    {
+      bill_validator: parsed.validation,
+      quality_assessor: parsed.quality,
+      ocr_extractor: parsed.ocr ?? undefined,
+    },
+    totalDurationMs,
+    inputTokens,
+    outputTokens,
+    BATCH_A_WEIGHTS,
+    { skippedSteps: skipped }
+  );
+
+  return parsed;
+}
+
+// ─── BATCH B: Expense Builder (SKU matcher + finalizer in 1 call) ───────────
+
+// ★ FLAT SCHEMA — models are much more reliable with flat top-level keys.
+// Old nested shape `{ sku_matches: { matches: [...] }, finalized_expense: {...} }`
+// caused frequent "Cannot read properties of undefined (reading 'matches')" errors.
+type MergedBuilderResponse = {
+  matches: AISKUMatch[];
+  finalized: AIExpenseFinalizerResult;
+};
+
+type AISKUMatch = AISKUMatcherResult['matches'][number];
+
+/**
+ * Resilient normaliser for Batch B. Accepts any of these shapes:
+ *   { matches: [...], finalized: {...} }                       ← canonical
+ *   { matches: [...], finalized_expense: {...} }
+ *   { sku_matches: { matches: [...] }, finalized_expense: {...} } ← old nested
+ *   { sku_matches: [...], finalized: {...} }
+ *   { results: [...], expense: {...} }                         ← paranoid fallback
+ */
+function normaliseBuilderShape(raw: unknown): MergedBuilderResponse {
+  const r = (raw ?? {}) as Record<string, unknown>;
+
+  // ── Extract matches array from any known shape ──
+  let matches: unknown = null;
+  if (Array.isArray(r.matches)) matches = r.matches;
+  else if (Array.isArray(r.results)) matches = r.results;
+  else if (r.sku_matches) {
+    const sm = r.sku_matches as Record<string, unknown>;
+    if (Array.isArray(sm)) matches = sm;
+    else if (Array.isArray(sm.matches)) matches = sm.matches;
+  } else if (r.skuMatches) {
+    const sm = r.skuMatches as Record<string, unknown>;
+    if (Array.isArray(sm)) matches = sm;
+    else if (Array.isArray(sm.matches)) matches = sm.matches;
+  }
+
+  // ── Extract finalized object from any known shape ──
+  const finalized =
+    (r.finalized ??
+      r.finalized_expense ??
+      r.finalizedExpense ??
+      r.expense ??
+      r.result ??
+      null) as Record<string, unknown> | null;
+
+  if (!Array.isArray(matches)) {
+    throw new Error(
+      `Builder response missing matches array. Keys present: ${Object.keys(r).join(', ')}`
+    );
+  }
+  if (!finalized || typeof finalized !== 'object') {
+    throw new Error(
+      `Builder response missing finalized object. Keys present: ${Object.keys(r).join(', ')}`
+    );
+  }
+
+  return {
+    matches: matches as AISKUMatch[],
+    finalized: finalized as unknown as AIExpenseFinalizerResult,
+  };
+}
+
+/**
+ * Strict Gemini responseSchema for Batch B (SKU matcher + expense finalizer).
+ * Flat top-level keys `matches` and `finalized` — Gemini will emit exactly
+ * this shape or the API call will fail, eliminating the class of "missing
+ * key" bugs we hit with OpenRouter's best-effort JSON mode.
+ */
+const BUILDER_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    matches: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          line_item_index: { type: Type.NUMBER },
+          matched_sku_id: { type: Type.STRING, nullable: true },
+          matched_sku_code: { type: Type.STRING, nullable: true },
+          matched_sku_name: { type: Type.STRING, nullable: true },
+          match_confidence: { type: Type.NUMBER },
+          is_new_sku: { type: Type.BOOLEAN },
+          suggested_sku_name: { type: Type.STRING },
+          suggested_category: { type: Type.STRING },
+          suggested_base_unit: { type: Type.STRING },
+          suggested_purchase_unit: { type: Type.STRING },
+          suggested_purchase_size: { type: Type.NUMBER, nullable: true },
+          suggested_purchase_unit_label: { type: Type.STRING, nullable: true },
+          suggested_conversion_factor: { type: Type.NUMBER },
+        },
+        required: [
+          'line_item_index',
+          'match_confidence',
+          'is_new_sku',
+          'suggested_sku_name',
+          'suggested_category',
+          'suggested_base_unit',
+          'suggested_purchase_unit',
+          'suggested_conversion_factor',
+        ],
+      },
+    },
+    finalized: {
+      type: Type.OBJECT,
+      properties: {
+        expense_date: { type: Type.STRING },
+        vendor_name: { type: Type.STRING },
+        place: { type: Type.STRING },
+        receipt_number: { type: Type.STRING, nullable: true },
+        expense_type: { type: Type.STRING },
+        lines: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              line_item_index: { type: Type.NUMBER },
+              sku_id: { type: Type.STRING, nullable: true },
+              sku_code: { type: Type.STRING, nullable: true },
+              description: { type: Type.STRING },
+              purchase_qty: { type: Type.NUMBER },
+              purchase_unit: { type: Type.STRING },
+              purchase_size: { type: Type.NUMBER, nullable: true },
+              purchase_unit_label: { type: Type.STRING, nullable: true },
+              base_qty: { type: Type.NUMBER },
+              base_unit: { type: Type.STRING },
+              unit_price: { type: Type.NUMBER },
+              subtotal: { type: Type.NUMBER },
+              discount: { type: Type.NUMBER },
+              final_amount: { type: Type.NUMBER },
+              category: { type: Type.STRING },
+              is_new_sku: { type: Type.BOOLEAN },
+            },
+            required: [
+              'line_item_index',
+              'description',
+              'purchase_qty',
+              'purchase_unit',
+              'base_qty',
+              'base_unit',
+              'unit_price',
+              'subtotal',
+              'discount',
+              'final_amount',
+              'category',
+              'is_new_sku',
+            ],
+          },
+        },
+        subtotal: { type: Type.NUMBER },
+        tax: { type: Type.NUMBER },
+        service_charge: { type: Type.NUMBER },
+        total: { type: Type.NUMBER },
+        confidence_score: { type: Type.NUMBER },
+        requires_review: { type: Type.BOOLEAN },
+        review_reasons: { type: Type.ARRAY, items: { type: Type.STRING } },
+      },
+      required: [
+        'expense_date',
+        'vendor_name',
+        'place',
+        'expense_type',
+        'lines',
+        'subtotal',
+        'tax',
+        'service_charge',
+        'total',
+        'confidence_score',
+        'requires_review',
+        'review_reasons',
+      ],
+    },
+  },
+  required: ['matches', 'finalized'],
+};
+
+export async function runExpenseBuilder(
+  jobId: string,
+  ocrResult: AIOCRResult,
+  existingSKUs: ExpenseSKU[]
+): Promise<AIExpenseFinalizerResult> {
+  const startedAt = Date.now();
+
+  // ─── Pre-filter SKUs via Fuse for context efficiency (unchanged) ──────────
+  const fuse = new Fuse(existingSKUs, {
+    keys: ['name', 'nameTh', 'code'],
+    threshold: 0.4,
+    includeScore: true,
+  });
+
+  // ─── Group duplicate items (unchanged logic) ──────────────────────────────
+  const itemGroups: Map<string, number[]> = new Map();
+  ocrResult.line_items.forEach((item, idx) => {
+    const normalized = normalizeDescription(item.description);
+    if (!itemGroups.has(normalized)) itemGroups.set(normalized, []);
+    itemGroups.get(normalized)!.push(idx);
+  });
+  const rawDescGroups: Map<string, number[]> = new Map();
+  ocrResult.line_items.forEach((item, idx) => {
+    const rawKey = item.description.trim().toLowerCase();
+    if (!rawDescGroups.has(rawKey)) rawDescGroups.set(rawKey, []);
+    rawDescGroups.get(rawKey)!.push(idx);
+  });
+  for (const [, rawIndices] of rawDescGroups) {
+    if (rawIndices.length > 1) {
+      const firstNorm = normalizeDescription(ocrResult.line_items[rawIndices[0]].description);
+      const existingGroup = itemGroups.get(firstNorm) ?? [];
+      const merged = Array.from(new Set([...existingGroup, ...rawIndices]));
+      itemGroups.set(firstNorm, merged);
+    }
+  }
+
+  const relevantSKUs: ExpenseSKU[] = [];
+  for (const item of ocrResult.line_items) {
+    const results = fuse.search(item.description, { limit: 3 });
+    for (const r of results) {
+      if (!relevantSKUs.find((s) => s.id === r.item.id)) relevantSKUs.push(r.item);
+    }
+  }
+
+  const skuContext = relevantSKUs.map((s) => ({
+    id: s.id,
+    code: s.code,
+    name: s.name,
+    subCategory: s.subCategory,
+    baseUnit: s.baseUnit,
+    purchaseUnit: s.purchaseUnit,
+    conversionFactor: s.conversionFactor,
+  }));
+
+  const groupingInfo = Array.from(itemGroups.entries())
+    .filter(([, indices]) => indices.length > 1)
+    .map(([normalized, indices]) => ({
+      normalized_name: normalized,
+      line_indices: indices,
+      original_descriptions: indices.map((i) => ocrResult.line_items[i].description),
+    }));
+
+  const today = new Date().toLocaleDateString('en-GB');
+  const currentYear = new Date().getFullYear();
+
+  const systemInstruction = `Two-task specialist for a Thai restaurant expense system. Today=${today}.
+
+TASK 1 — SKU matching: map each OCR line_item_index to an existing SKU or mark is_new_sku=true.
+TASK 2 — Finalization: build the canonical expense record using YOUR own matches above (stay consistent).
+
+★ LANGUAGE PRESERVATION (critical):
+- Copy every "description", "vendor_name", "place", "suggested_sku_name" EXACTLY as it appears in the OCR input — in its ORIGINAL script.
+- NEVER transliterate/romanize/translate Thai text. If OCR gave Thai, your output is Thai. If mixed, preserve the mix.
+- Example: OCR description "ผัดไทย" → output description "ผัดไทย" (NOT "Pad Thai").
+
+Rules:
+- Match semantically across Thai/English/mixed (e.g. recognise "น้ำตาล" ≡ "Sugar" for matching purposes, but keep whichever string appeared in the input verbatim in the output).
+- Confidence ≥0.9 confident, 0.7-0.9 likely, <0.7 → is_new_sku=true.
+- Items in the pre-computed duplicate groups below MUST share one SKU.
+- Dates CE: BE−543=CE. If OCR year looks wrong, prefer ${currentYear}. Handle printed short years as BE.
+- Totals: Total = Subtotal + Tax + ServiceCharge (never subtract). If printed total disagrees, trust the printed total & adjust subtotal/tax.
+- Units: kg↔g ×1000, L↔ml ×1000; else use suggested_conversion_factor.
+- requires_review=true if: bank transfer | any confidence<0.7 | total diff >5% | ambiguous date | any is_new_sku=true.
+
+BASE_UNIT: g|ml|unit|piece|sheet|roll|cm|sqm
+PURCHASE_UNIT: kg|g|L|ml|pack|box|case|bottle|can|bag|unit|piece|roll|sheet|set
+CATEGORY: capex_equipment|capex_decor|capex_furniture|capex_technology|capex_vehicle|capex_renovation|inventory_food|inventory_drinks|inventory_packaging|inventory_cleaning|inventory_consumable|operating_staff|operating_marketing|operating_admin|utility_electric|utility_water|utility_gas|utility_internet|other`;
+
+  const userText = `OCR:
+${JSON.stringify(ocrResult)}
+
+${groupingInfo.length ? `DUPLICATE_GROUPS (each group must share one SKU):\n${JSON.stringify(groupingInfo)}\n\n` : ''}EXISTING_SKUS (pre-filtered):
+${JSON.stringify(skuContext)}
+
+Totals to reconcile: subtotal=${ocrResult.subtotal}, tax=${ocrResult.tax ?? 0}, service=${ocrResult.service_charge ?? 0}, total=${ocrResult.total}.`;
+
+  const { parsed: rawParsed, inputTokens, outputTokens, modelUsed } = await callGemini(
+    MODELS.REASONING,
+    systemInstruction,
+    [userText],
+    {
+      responseSchema: BUILDER_SCHEMA,
+      fallbackModels: MODELS.REASONING_FALLBACKS,
+      maxOutputTokens: 4500,
+      thinkingBudget: 0,
+    }
+  );
+
+  // responseSchema guarantees shape, but normaliseBuilderShape is cheap defence.
+  const normalised = normaliseBuilderShape(rawParsed);
+  const skuMatches: AISKUMatcherResult = { matches: normalised.matches };
+  const finalResult: AIExpenseFinalizerResult = normalised.finalized;
+
+  if (modelUsed !== MODELS.REASONING) {
+    console.log(`[EXPENSE BUILDER] served by fallback: ${modelUsed}`);
+  }
+
+  // ─── POST-PROCESS 1: Consolidate duplicate-group SKU matches (unchanged) ──
+  for (const [, indices] of itemGroups) {
+    if (indices.length > 1) {
+      const groupMatches = indices
+        .map((idx) => skuMatches.matches.find((m) => m.line_item_index === idx))
+        .filter((m): m is NonNullable<typeof m> => m != null);
+      if (groupMatches.length > 0) {
+        const bestMatch = groupMatches.reduce((best, m) => {
+          if (!best.is_new_sku && m.is_new_sku) return best;
+          if (best.is_new_sku && !m.is_new_sku) return m;
+          return m.match_confidence > best.match_confidence ? m : best;
+        }, groupMatches[0]);
+
+        for (const idx of indices) {
+          const match = skuMatches.matches.find((m) => m.line_item_index === idx);
+          if (match && match !== bestMatch) {
+            match.matched_sku_id = bestMatch.matched_sku_id;
+            match.matched_sku_code = bestMatch.matched_sku_code;
+            match.matched_sku_name = bestMatch.matched_sku_name;
+            match.is_new_sku = bestMatch.is_new_sku;
+            match.suggested_sku_name = bestMatch.suggested_sku_name;
+            match.suggested_category = bestMatch.suggested_category;
+            match.suggested_base_unit = bestMatch.suggested_base_unit;
+            match.suggested_purchase_unit = bestMatch.suggested_purchase_unit;
+            match.suggested_conversion_factor = bestMatch.suggested_conversion_factor;
+            match.match_confidence = Math.max(match.match_confidence, bestMatch.match_confidence);
+          }
+        }
+      }
+    }
+  }
+
+  // ─── POST-PROCESS 2: Merge duplicate NEW-SKU finalizer lines (unchanged) ──
+  const newSkuGroups: Map<string, typeof finalResult.lines> = new Map();
+  const finalLines: typeof finalResult.lines = [];
+  for (const line of finalResult.lines) {
+    if (line.is_new_sku && !line.sku_id) {
+      const dedupeKey = normalizeDescription(line.description);
+      if (!newSkuGroups.has(dedupeKey)) newSkuGroups.set(dedupeKey, []);
+      newSkuGroups.get(dedupeKey)!.push(line);
+    } else {
+      finalLines.push(line);
+    }
+  }
+  for (const [, dupeLines] of newSkuGroups) {
+    if (dupeLines.length === 1) {
+      finalLines.push(dupeLines[0]);
+    } else {
+      const base = { ...dupeLines[0] };
+      for (let i = 1; i < dupeLines.length; i++) {
+        base.purchase_qty += dupeLines[i].purchase_qty;
+        base.base_qty += dupeLines[i].base_qty;
+        base.subtotal += dupeLines[i].subtotal;
+        base.discount = (base.discount ?? 0) + (dupeLines[i].discount ?? 0);
+        base.final_amount += dupeLines[i].final_amount;
+      }
+      console.log(
+        `[MERGE NEW SKU] Merged ${dupeLines.length} lines into 1: "${base.description}" total qty ${base.purchase_qty} ${base.purchase_unit}`
+      );
+      finalLines.push(base);
+    }
+  }
+  finalLines.sort((a, b) => a.line_item_index - b.line_item_index);
+  finalLines.forEach((line, idx) => {
+    line.line_item_index = idx;
+  });
+  finalResult.lines = finalLines;
+
+  // ━━━ LOGGING ━━━
+  console.log('\n🔧 [BATCH B] Expense builder results');
+  console.log(`  matched ${skuMatches.matches.length} items`);
+  console.log(`  finalized ${finalResult.lines.length} lines — total ฿${finalResult.total}`);
+  console.log(
+    `  confidence=${(finalResult.confidence_score * 100).toFixed(0)}% requires_review=${finalResult.requires_review}`
+  );
+
+  const totalDurationMs = Date.now() - startedAt;
+
+  await completeBatch(
+    jobId,
+    BATCH_B,
+    {
+      sku_matcher: skuMatches,
+      expense_finalizer: finalResult,
+    },
+    totalDurationMs,
+    inputTokens,
+    outputTokens,
+    BATCH_B_WEIGHTS,
+    { finalResult }
+  );
+
+  return finalResult;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+
 export const expenseAIService = {
   async createJob(imageUrl: string, imagePath: string): Promise<string> {
     const ref = doc(collection(db, JOBS_COL));
@@ -919,140 +2112,98 @@ export const expenseAIService = {
     } as AIExpenseJob;
   },
 
+  /**
+   * Execute the next available batch of work for this job. Despite the name,
+   * a single `runStep` call may resolve multiple UI "steps" at once because
+   * the pipeline is physically organised into two batches (vision, builder).
+   *
+   * The targetStep parameter is kept for API compatibility with the client
+   * nudge logic, but is effectively used only to route the call to the
+   * correct batch. Whichever step in a batch arrives first wins the claim;
+   * subsequent nudges for the same batch are no-ops.
+   */
   async runStep(
-    jobId: string, 
+    jobId: string,
     skus: ExpenseSKU[],
     targetStep?: string
   ): Promise<{ status: string; currentStep: string | null }> {
     const jobRef = doc(db, JOBS_COL, jobId);
-    
-    // Use TRANSACTION to pick the next step and mark it running atomically
-    const nextStep = await runTransaction(db, async (transaction) => {
-      const snap = await transaction.get(jobRef);
-      if (!snap.exists()) throw new Error('Job not found');
-      
-      const data = snap.data();
-      const steps = (data.steps as AIPipelineStepResult[]) ?? [];
 
-      // Determine the first pending step that is READY to run
-      const nextStepIdx = steps.findIndex(s => {
-        if (s.status !== 'pending') return false;
-        
-        // If targetStep is provided, ONLY run that one
-        if (targetStep && s.step !== targetStep) return false;
-
-        if (s.stepNumber <= 3) return true;
-        return steps.filter(prev => prev.stepNumber < s.stepNumber).every(prev => prev.status === 'done');
-      });
-
-      if (nextStepIdx === -1) return null;
-
-      const stepName = steps[nextStepIdx].step;
-      
-      // Update overall status to running if needed
-      const updates: Record<string, string | AIPipelineStepResult[] | null> = { currentStep: stepName };
-      if (data.overallStatus === 'pending') updates.overallStatus = 'running';
-
-      // Update specific step status
-      const updatedSteps = [...steps];
-      updatedSteps[nextStepIdx] = { 
-        ...updatedSteps[nextStepIdx], 
-        status: 'running', 
-        startedAt: new Date(),
-        updatedAt: new Date()
-      };
-      updates.steps = updatedSteps;
-
-      transaction.update(jobRef, { ...updates, updatedAt: serverTimestamp() });
-      return stepName;
-    });
-
-    if (!nextStep) {
+    // Decide which batch this nudge belongs to. If targetStep is unspecified,
+    // run whichever batch is next (vision first, then builder).
+    const batchA_hasPending = async () => {
       const snap = await getDoc(jobRef);
-      const data = snap.data()!;
-      
-      if (data.overallStatus === 'running' || data.overallStatus === 'pending') {
-        const steps = (data.steps as AIPipelineStepResult[]) ?? [];
-        const lastStepResult = steps.find(s => s.step === 'expense_finalizer')?.result as AIExpenseFinalizerResult | undefined;
-        if (lastStepResult) {
-          const finalStatus = lastStepResult.requires_review ? 'needs_review' : 'completed';
-          await updateDoc(jobRef, { overallStatus: finalStatus, updatedAt: serverTimestamp() });
-        }
-      }
-      return { status: data.overallStatus, currentStep: null };
+      const steps = (snap.data()?.steps as AIPipelineStepResult[]) ?? [];
+      return BATCH_A.some((s) => steps.find((x) => x.step === s)?.status === 'pending');
+    };
+
+    let batch: AIPipelineStep[];
+    if (targetStep && BATCH_A.includes(targetStep as AIPipelineStep)) {
+      batch = BATCH_A;
+    } else if (targetStep && BATCH_B.includes(targetStep as AIPipelineStep)) {
+      batch = BATCH_B;
+    } else {
+      // No target → pick whichever batch still has pending work
+      batch = (await batchA_hasPending()) ? BATCH_A : BATCH_B;
     }
 
-    console.log(`\n🚀 [AI STEP] Executing "${nextStep}" for job: ${jobId}${targetStep ? ` (Strict Targeted: ${targetStep})` : ''}`);
-    const snap2 = await getDoc(jobRef);
-    const data2 = snap2.data();
-    const imageUrl = data2?.imageUrl as string;
+    // Try to atomically claim the batch. Another caller may already own it.
+    const claim = await claimBatch(jobId, batch);
+
+    if (!claim.claimed) {
+      // Batch is already running or already done. Return current job state.
+      const snap = await getDoc(jobRef);
+      const data = snap.data()!;
+      const steps = (data.steps as AIPipelineStepResult[]) ?? [];
+      const nextPending = steps.find((s) => s.status === 'pending');
+      return { status: data.overallStatus, currentStep: nextPending?.step ?? null };
+    }
+
+    console.log(
+      `\n🚀 [AI BATCH] Executing ${batch === BATCH_A ? 'BATCH A (vision)' : 'BATCH B (builder)'} for job: ${jobId}${
+        targetStep ? ` (trigger: ${targetStep})` : ''
+      }`
+    );
 
     try {
-      if (nextStep === 'bill_validator') {
-        const res = await runBillValidator(jobId, imageUrl);
-        if (!res.is_valid_document) {
+      if (batch === BATCH_A) {
+        const vision = await runVisionAnalyzer(jobId, claim.imageUrl);
+
+        // Early-exit on validation / quality failures (saves Batch B call)
+        if (!vision.validation.is_valid_document) {
           await updateDoc(jobRef, {
             overallStatus: 'failed',
-            errorMessage: `Not a valid document: ${res.rejection_reason ?? res.document_type}`,
+            errorMessage: `Not a valid document: ${vision.validation.rejection_reason ?? vision.validation.document_type}`,
             updatedAt: serverTimestamp(),
           });
-        }
-      } else if (nextStep === 'quality_assessor') {
-        const res = await runQualityAssessor(jobId, imageUrl);
-        if (res.recommended_action === 'request_better_image') {
+        } else if (vision.quality.recommended_action === 'request_better_image') {
           await updateDoc(jobRef, {
             overallStatus: 'needs_review',
-            errorMessage: `Image quality too poor: ${res.issues.join(', ')}`,
+            errorMessage: `Image quality too poor: ${vision.quality.issues.join(', ')}`,
             updatedAt: serverTimestamp(),
           });
         }
-      } else if (nextStep === 'ocr_extractor') {
-        await runOCRExtractor(jobId, imageUrl);
-      } else if (nextStep === 'sku_matcher') {
-        // Step 4 needs step 3 result. Force re-fetch snapshot to ensure we have Step 3 data!
+      } else {
+        // BATCH_B: builder needs Batch A's OCR result
         const freshSnap = await getDoc(jobRef);
         const freshSteps = (freshSnap.data()?.steps as AIPipelineStepResult[]) ?? [];
-        const ocrStep = freshSteps.find(s => s.step === 'ocr_extractor');
-
-        if (!ocrStep || ocrStep.status !== 'done') {
-          console.error('[runStep] OCR result still missing in Firestore even after re-fetch', { jobId });
-          throw new Error('OCR result missing');
+        const ocrStep = freshSteps.find((s) => s.step === 'ocr_extractor');
+        if (!ocrStep || ocrStep.status !== 'done' || !ocrStep.result) {
+          throw new Error('OCR result missing — cannot run builder batch');
         }
-        await runSKUMatcher(jobId, ocrStep.result as AIOCRResult, skus);
-      } else if (nextStep === 'expense_finalizer') {
-        // Step 5 needs step 3 & 4 results. Force re-fetch.
-        const freshSnap = await getDoc(jobRef);
-        const freshSteps = (freshSnap.data()?.steps as AIPipelineStepResult[]) ?? [];
-        const ocrResult = freshSteps.find(s => s.step === 'ocr_extractor')?.result;
-        const matcherResult = freshSteps.find(s => s.step === 'sku_matcher')?.result;
-
-        if (!ocrResult || !matcherResult) throw new Error('Step 3 or 4 results missing');
-        const finalResult = await runExpenseFinalizer(
-          jobId, 
-          ocrResult as AIOCRResult, 
-          matcherResult as AISKUMatcherResult, 
-          skus
-        );
-
-        const finalStatus = finalResult.requires_review ? 'needs_review' : 'completed';
-        const totalDuration = freshSteps.reduce((s, st) => s + (st.durationMs ?? 0), 0);
-
-        await updateDoc(jobRef, {
-          overallStatus: finalStatus,
-          finalResult: finalResult,
-          totalDurationMs: totalDuration,
-          updatedAt: serverTimestamp(),
-        });
+        await runExpenseBuilder(jobId, ocrStep.result as AIOCRResult, skus);
       }
 
       const updatedSnap = await getDoc(jobRef);
       const updatedData = updatedSnap.data()!;
+      const updatedSteps = (updatedData.steps as AIPipelineStepResult[]) ?? [];
+      const nextPending = updatedSteps.find((s) => s.status === 'pending');
       return {
         status: updatedData.overallStatus,
-        currentStep: (updatedData.steps as AIPipelineStepResult[]).find(s => s.status === 'pending')?.step ?? null
+        currentStep: nextPending?.step ?? null,
       };
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Step execution failed';
+      const msg = error instanceof Error ? error.message : 'Batch execution failed';
       await updateDoc(jobRef, {
         overallStatus: 'failed',
         errorMessage: msg,
@@ -1062,6 +2213,12 @@ export const expenseAIService = {
     }
   },
 
+  /**
+   * Run the full pipeline end-to-end in a single invocation.
+   * Makes exactly TWO OpenRouter API calls in the happy path (one vision,
+   * one builder). Invalid-document / poor-image rejections exit after the
+   * first call, using only ONE API request.
+   */
   async runPipeline(jobId: string, existingSKUs: ExpenseSKU[]): Promise<AIExpenseFinalizerResult> {
     const jobRef = doc(db, JOBS_COL, jobId);
     const snap = await getDoc(jobRef);
@@ -1070,65 +2227,54 @@ export const expenseAIService = {
     const jobData = snap.data() as { imageUrl: string };
     const imageUrl = jobData.imageUrl;
 
-    console.log(`\n🚀 [AI PIPELINE] Starting background execution for job: ${jobId}`);
+    console.log(`\n🚀 [AI PIPELINE] Starting 2-call batched execution for job: ${jobId}`);
     const pipeStart = Date.now();
 
     try {
-      // ── Step 1: Validator ─────
-      console.log('  ⏳ [Step 1/5] Running Bill Validator...');
-      const step1 = await runBillValidator(jobId, imageUrl);
-      if (!step1.is_valid_document) {
-        console.warn('  ❌ [Step 1] REJECTED: Not a valid document.');
+      // ── BATCH A (1 API call): validator + quality + OCR ─────────────────
+      console.log('  ⏳ [Batch A] Running vision analyzer (validator+quality+OCR)...');
+      const batchA_claim = await claimBatch(jobId, BATCH_A);
+      if (!batchA_claim.claimed) {
+        console.log('  ℹ️  [Batch A] already in progress/done — skipping.');
+      }
+      const vision = await runVisionAnalyzer(jobId, imageUrl);
+
+      if (!vision.validation.is_valid_document) {
+        console.warn('  ❌ [Batch A] REJECTED: Not a valid document.');
         await updateDoc(jobRef, {
           overallStatus: 'failed',
-          errorMessage: `Not a valid document: ${step1.rejection_reason ?? step1.document_type}`,
+          errorMessage: `Not a valid document: ${vision.validation.rejection_reason ?? vision.validation.document_type}`,
           updatedAt: serverTimestamp(),
         });
-        throw new Error(`Not a valid expense document: ${step1.rejection_reason}`);
+        throw new Error(`Not a valid expense document: ${vision.validation.rejection_reason}`);
       }
-      console.log('  ✅ [Step 1] Document validated.');
-
-      // ── Step 2: Quality ─────
-      console.log('  ⏳ [Step 2/5] Running Quality Assessor...');
-      const step2 = await runQualityAssessor(jobId, imageUrl);
-      if (step2.recommended_action === 'request_better_image') {
-        console.warn('  ❌ [Step 2] REJECTED: Poor image quality.');
+      if (vision.quality.recommended_action === 'request_better_image') {
+        console.warn('  ❌ [Batch A] REJECTED: Poor image quality.');
         await updateDoc(jobRef, {
           overallStatus: 'needs_review',
-          errorMessage: `Image quality too poor: ${step2.issues.join(', ')}`,
+          errorMessage: `Image quality too poor: ${vision.quality.issues.join(', ')}`,
           updatedAt: serverTimestamp(),
         });
-        throw new Error(`Image quality poor: ${step2.issues.join(', ')}`);
+        throw new Error(`Image quality poor: ${vision.quality.issues.join(', ')}`);
       }
-      console.log('  ✅ [Step 2] Quality acceptable.');
+      if (!vision.ocr) throw new Error('Vision analyzer returned no OCR result');
+      console.log(`  ✅ [Batch A] Validated + ${vision.ocr.line_items.length} items extracted.`);
 
-      // ── Step 3: OCR ─────
-      console.log('  ⏳ [Step 3/5] Running OCR Extractor (Pro Model)...');
-      const step3 = await runOCRExtractor(jobId, imageUrl);
-      console.log(`  ✅ [Step 3] Extracted ${step3.line_items.length} raw items.`);
+      // ── BATCH B (1 API call): SKU matcher + finalizer ────────────────────
+      console.log('  ⏳ [Batch B] Running expense builder (SKU matcher + finalizer)...');
+      const batchB_claim = await claimBatch(jobId, BATCH_B);
+      if (!batchB_claim.claimed) {
+        console.log('  ℹ️  [Batch B] already in progress/done — skipping.');
+      }
+      const finalResult = await runExpenseBuilder(jobId, vision.ocr, existingSKUs);
+      console.log('  ✅ [Batch B] Expense record built.');
 
-      // ── Step 4: SKU Matching ─────
-      console.log('  ⏳ [Step 4/5] Matching items to SKUs...');
-      const step4 = await runSKUMatcher(jobId, step3, existingSKUs);
-      console.log('  ✅ [Step 4] SKU matching complete.');
-
-      // ── Step 5: Finalizer ─────
-      console.log('  ⏳ [Step 5/5] Building final expense record...');
-      const step5 = await runExpenseFinalizer(jobId, step3, step4, existingSKUs);
-      console.log('  ✅ [Step 5] Finalization complete.');
-
-      const finalStatus = step5.requires_review ? 'needs_review' : 'completed';
+      const finalStatus = finalResult.requires_review ? 'needs_review' : 'completed';
       const totalDuration = Date.now() - pipeStart;
-
-      await updateDoc(jobRef, {
-        overallStatus: finalStatus,
-        finalResult: step5,
-        totalDurationMs: totalDuration,
-        updatedAt: serverTimestamp(),
-      });
-
-      console.log(`\n🎉 [AI PIPELINE] SUCCESS in ${Math.round(totalDuration / 1000)}s - Status: ${finalStatus}\n`);
-      return step5;
+      console.log(
+        `\n🎉 [AI PIPELINE] SUCCESS in ${Math.round(totalDuration / 1000)}s (2 API calls) - Status: ${finalStatus}\n`
+      );
+      return finalResult;
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Pipeline failed';
       await updateDoc(jobRef, {

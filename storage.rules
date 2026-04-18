@@ -24,6 +24,13 @@ service firebase.storage {
                       request.resource.contentType.matches('image/.*'); // Images only
     }
 
+    // Manual expense receipts and other expense docs: Public read, validated write
+    match /expenses/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.resource.size < 10 * 1024 * 1024 && // Max 10MB
+                      request.resource.contentType.matches('image/.*'); // Images only
+    }
+
     // Temporary uploads: Authenticated write, short-lived
     match /temp/{fileName} {
       allow read, write: if request.auth != null &&
