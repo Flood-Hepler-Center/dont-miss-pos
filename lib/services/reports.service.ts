@@ -8,6 +8,7 @@ import {
 import { db } from '@/lib/firebase/config';
 import type { Order } from '@/types';
 import type { Payment } from '@/types/payment';
+import { getLineCost, fetchCostMaps } from '@/lib/utils/costCalculator';
 
 export interface EODReport {
   totalRevenue: number;
@@ -177,9 +178,11 @@ export interface SummaryPivotRow {
   key: string; // tableId + paymentTime
   tableId: string;
   paymentTime: string;
-  sumAmount: number;
+  sumAmount: number;       // gross (before discount)
+  sumDiscount: number;     // payment-level discount
+  netAmount: number;       // sumAmount - sumDiscount
   sumCost: number;
-  avgGP: number;
+  avgGP: number;           // based on netAmount
   lineCount: number;
 }
 
@@ -188,6 +191,8 @@ export interface SummaryOrderByDayReport {
   pivot: SummaryPivotRow[];
   grandTotal: {
     sumAmount: number;
+    sumDiscount: number;
+    netAmount: number;
     sumCost: number;
     avgGP: number;
   };
@@ -884,51 +889,8 @@ export const reportsService = {
         }
       });
 
-      // 3. Fetch menu items (for costPrice fallback)
-      const menuItemsSnapshot = await getDocs(collection(db, 'menuItems'));
-      const menuItemsMap = new Map<string, { costPrice?: number; name: string }>();
-      menuItemsSnapshot.docs.forEach(doc => {
-        const data = doc.data();
-        menuItemsMap.set(doc.id, { costPrice: data.costPrice || 0, name: data.name });
-      });
-
-      // 4. Fetch recipes (for BOM-based cost calc)
-      const recipesSnapshot = await getDocs(collection(db, 'recipes'));
-      const recipesByMenuItemId = new Map<string, { ingredients: Array<{ inventoryItemId: string; quantity: number }>; yield: number; isActive: boolean }>();
-      recipesSnapshot.docs.forEach(doc => {
-        const data = doc.data();
-        if (data.isActive !== false && data.menuItemId) {
-          recipesByMenuItemId.set(data.menuItemId, {
-            ingredients: data.ingredients || [],
-            yield: data.yield || 1,
-            isActive: data.isActive !== false,
-          });
-        }
-      });
-
-      // 5. Fetch inventory items (for unit cost)
-      const inventorySnapshot = await getDocs(collection(db, 'inventory'));
-      const inventoryCostMap = new Map<string, number>();
-      inventorySnapshot.docs.forEach(doc => {
-        const data = doc.data();
-        inventoryCostMap.set(doc.id, data.costPerUnit || data.unitCost || 0);
-      });
-
-      // Helper: calculate cost per serving for a menu item
-      const getCostPerServing = (menuItemId: string, recipeMultiplier: number = 1): number => {
-        const recipe = recipesByMenuItemId.get(menuItemId);
-        if (recipe && recipe.ingredients.length > 0) {
-          let totalCost = 0;
-          recipe.ingredients.forEach(ing => {
-            const unitCost = inventoryCostMap.get(ing.inventoryItemId) || 0;
-            totalCost += ing.quantity * unitCost;
-          });
-          return (totalCost / (recipe.yield || 1)) * recipeMultiplier;
-        }
-        // Fallback to menuItem.costPrice
-        const menuItem = menuItemsMap.get(menuItemId);
-        return (menuItem?.costPrice || 0) * recipeMultiplier;
-      };
+      // 3-5. Fetch cost maps (menu items, recipes, inventory) via shared utility
+      const costMaps = await fetchCostMaps();
 
       // 6. Build line items
       const lines: SummaryOrderLine[] = [];
@@ -948,15 +910,7 @@ export const reportsService = {
           order.items?.forEach(item => {
             if (item.isVoided) return;
 
-            // Determine recipe multiplier from modifiers
-            let recipeMultiplier = 1;
-            if (item.modifiers && item.modifiers.length > 0) {
-              const mod = item.modifiers.find(m => m.recipeMultiplier && m.recipeMultiplier > 0);
-              if (mod && mod.recipeMultiplier) recipeMultiplier = mod.recipeMultiplier;
-            }
-
-            const costPerServing = getCostPerServing(item.menuItemId, recipeMultiplier);
-            const lineCost = costPerServing * item.quantity;
+            const lineCost = getLineCost(item.menuItemId, item.quantity, item.modifiers, costMaps);
             const amount = item.subtotal || (item.price * item.quantity);
             const gpPercent = amount > 0 ? ((amount - lineCost) / amount) * 100 : 0;
 
@@ -989,7 +943,11 @@ export const reportsService = {
       });
 
       // 7. Build pivot (grouped by tableId + paymentTime)
-      const pivotMap = new Map<string, SummaryPivotRow>();
+      //    Track unique paymentIds per group to avoid double-counting discount
+      const pivotMap = new Map<string, SummaryPivotRow & { _paymentIds: Set<string> }>();
+      const paymentDiscountMap = new Map<string, number>();
+      payments.forEach(p => paymentDiscountMap.set(p.id, p.discountAmount || 0));
+
       lines.forEach(line => {
         const key = `${line.tableId}||${line.paymentTime}`;
         let row = pivotMap.get(key);
@@ -999,21 +957,41 @@ export const reportsService = {
             tableId: line.tableId,
             paymentTime: line.paymentTime,
             sumAmount: 0,
+            sumDiscount: 0,
+            netAmount: 0,
             sumCost: 0,
             avgGP: 0,
             lineCount: 0,
+            _paymentIds: new Set<string>(),
           };
           pivotMap.set(key, row);
         }
         row.sumAmount += line.amount;
         row.sumCost += line.cost;
         row.lineCount += 1;
+
+        // Attribute payment discount only once per payment
+        if (!row._paymentIds.has(line.paymentId)) {
+          row._paymentIds.add(line.paymentId);
+          row.sumDiscount += paymentDiscountMap.get(line.paymentId) || 0;
+        }
       });
 
-      const pivot = Array.from(pivotMap.values()).map(row => ({
-        ...row,
-        avgGP: row.sumAmount > 0 ? ((row.sumAmount - row.sumCost) / row.sumAmount) * 100 : 0,
-      }));
+      // Finalize pivot rows (strip internal field, compute net + GP)
+      const pivot: SummaryPivotRow[] = Array.from(pivotMap.values()).map(row => {
+        const netAmount = Math.max(0, row.sumAmount - row.sumDiscount);
+        return {
+          key: row.key,
+          tableId: row.tableId,
+          paymentTime: row.paymentTime,
+          sumAmount: row.sumAmount,
+          sumDiscount: row.sumDiscount,
+          netAmount,
+          sumCost: row.sumCost,
+          avgGP: netAmount > 0 ? ((netAmount - row.sumCost) / netAmount) * 100 : 0,
+          lineCount: row.lineCount,
+        };
+      });
 
       // Sort pivot by table then time
       pivot.sort((a, b) => {
@@ -1021,16 +999,20 @@ export const reportsService = {
         return a.paymentTime.localeCompare(b.paymentTime);
       });
 
-      // 8. Grand total
+      // 8. Grand total (discount aggregated from pivot rows to keep single-count guarantee)
       const grandSumAmount = pivot.reduce((s, r) => s + r.sumAmount, 0);
+      const grandSumDiscount = pivot.reduce((s, r) => s + r.sumDiscount, 0);
+      const grandNetAmount = Math.max(0, grandSumAmount - grandSumDiscount);
       const grandSumCost = pivot.reduce((s, r) => s + r.sumCost, 0);
-      const grandAvgGP = grandSumAmount > 0 ? ((grandSumAmount - grandSumCost) / grandSumAmount) * 100 : 0;
+      const grandAvgGP = grandNetAmount > 0 ? ((grandNetAmount - grandSumCost) / grandNetAmount) * 100 : 0;
 
       return {
         lines,
         pivot,
         grandTotal: {
           sumAmount: grandSumAmount,
+          sumDiscount: grandSumDiscount,
+          netAmount: grandNetAmount,
           sumCost: grandSumCost,
           avgGP: grandAvgGP,
         },

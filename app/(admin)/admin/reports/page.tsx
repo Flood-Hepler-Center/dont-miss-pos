@@ -176,7 +176,7 @@ export default function ReportsPage() {
       const header = [
         'Source POS — Table', 'Time', 'Payment', 'Menu', 'Quantity', 'Amount', 'Cost', 'GP%',
         '', // separator
-        'Pivot — Table', 'Time Payment', 'Sum of Amount', 'Sum of Cost', 'Avg GP%'
+        'Pivot — Table', 'Time Payment', 'Sum of Amount', 'Discount', 'Net Amount', 'Sum of Cost', 'Avg GP%'
       ].join(',');
 
       const dataRows: string[] = [];
@@ -202,10 +202,12 @@ export default function ReportsPage() {
               pivot.tableId,
               pivot.paymentTime,
               pivot.sumAmount.toFixed(2),
+              pivot.sumDiscount.toFixed(2),
+              pivot.netAmount.toFixed(2),
               pivot.sumCost.toFixed(2),
               `${pivot.avgGP.toFixed(1)}%`,
             ]
-          : ['', '', '', '', ''];
+          : ['', '', '', '', '', '', ''];
 
         dataRows.push([...lineCells, '', ...pivotCells].join(','));
       }
@@ -216,6 +218,8 @@ export default function ReportsPage() {
         '',
         'GRAND TOTAL', '',
         data.grandTotal.sumAmount.toFixed(2),
+        data.grandTotal.sumDiscount.toFixed(2),
+        data.grandTotal.netAmount.toFixed(2),
         data.grandTotal.sumCost.toFixed(2),
         `${data.grandTotal.avgGP.toFixed(1)}%`,
       ].join(','));
@@ -384,6 +388,8 @@ export default function ReportsPage() {
     if (reportType === 'summary_by_day' && 'lines' in reportData && 'pivot' in reportData) {
       const data = reportData as SummaryOrderByDayReport;
       const gtAmount = data.grandTotal.sumAmount;
+      const gtDiscount = data.grandTotal.sumDiscount;
+      const gtNet = data.grandTotal.netAmount;
       const gtCost = data.grandTotal.sumCost;
       const gtGP = data.grandTotal.avgGP;
 
@@ -393,24 +399,28 @@ export default function ReportsPage() {
           <div className="border-2 border-black p-4 bg-gray-50">
             <h3 className="font-bold text-sm mb-1 uppercase">★ Summary Order by Day</h3>
             <p className="text-[10px] text-gray-500 mb-3 italic">
-              Recipe cost linked from BOM (inventory stock items). GP% = (Amount − Cost) / Amount.
+              Recipe cost linked from BOM (inventory stock items). GP% = (Net Amount − Cost) / Net Amount. Net = Amount − Payment Discount.
             </p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <div className="border-2 border-black p-3 text-center bg-white">
-                <p className="text-xs mb-1">TOTAL AMOUNT</p>
-                <p className="text-xl font-bold">฿{gtAmount.toFixed(2)}</p>
+                <p className="text-xs mb-1">GROSS AMOUNT</p>
+                <p className="text-lg font-bold">฿{gtAmount.toFixed(2)}</p>
               </div>
               <div className="border-2 border-black p-3 text-center bg-white">
-                <p className="text-xs mb-1">TOTAL COST</p>
-                <p className="text-xl font-bold text-red-600">฿{gtCost.toFixed(2)}</p>
+                <p className="text-xs mb-1">DISCOUNT</p>
+                <p className="text-lg font-bold text-orange-600">-฿{gtDiscount.toFixed(2)}</p>
               </div>
               <div className="border-2 border-black p-3 text-center bg-white">
-                <p className="text-xs mb-1">GROSS PROFIT</p>
-                <p className="text-xl font-bold text-green-700">฿{(gtAmount - gtCost).toFixed(2)}</p>
+                <p className="text-xs mb-1">NET AMOUNT</p>
+                <p className="text-lg font-bold">฿{gtNet.toFixed(2)}</p>
+              </div>
+              <div className="border-2 border-black p-3 text-center bg-white">
+                <p className="text-xs mb-1">COST</p>
+                <p className="text-lg font-bold text-red-600">฿{gtCost.toFixed(2)}</p>
               </div>
               <div className="border-2 border-black p-3 text-center bg-white">
                 <p className="text-xs mb-1">AVG GP%</p>
-                <p className="text-xl font-bold">{gtGP.toFixed(1)}%</p>
+                <p className="text-lg font-bold text-green-700">{gtGP.toFixed(1)}%</p>
               </div>
             </div>
           </div>
@@ -487,6 +497,8 @@ export default function ReportsPage() {
                     <th className="p-2 border-r border-gray-300">TABLE</th>
                     <th className="p-2 border-r border-gray-300">TIME PAYMENT</th>
                     <th className="p-2 border-r border-gray-300 text-right">SUM OF AMOUNT</th>
+                    <th className="p-2 border-r border-gray-300 text-right">DISCOUNT</th>
+                    <th className="p-2 border-r border-gray-300 text-right">NET AMOUNT</th>
                     <th className="p-2 border-r border-gray-300 text-right">SUM OF COST</th>
                     <th className="p-2 text-right">AVG GP%</th>
                   </tr>
@@ -496,8 +508,14 @@ export default function ReportsPage() {
                     <tr key={row.key} className="border-b border-gray-200">
                       <td className="p-2 border-r border-gray-200 font-bold">{row.tableId}</td>
                       <td className="p-2 border-r border-gray-200">{row.paymentTime}</td>
-                      <td className="p-2 border-r border-gray-200 text-right font-bold">
+                      <td className="p-2 border-r border-gray-200 text-right">
                         ฿{row.sumAmount.toFixed(2)}
+                      </td>
+                      <td className="p-2 border-r border-gray-200 text-right text-orange-600">
+                        {row.sumDiscount > 0 ? `-฿${row.sumDiscount.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="p-2 border-r border-gray-200 text-right font-bold">
+                        ฿{row.netAmount.toFixed(2)}
                       </td>
                       <td className="p-2 border-r border-gray-200 text-right text-red-600">
                         ฿{row.sumCost.toFixed(2)}
@@ -522,6 +540,12 @@ export default function ReportsPage() {
                     </td>
                     <td className="p-2 border-r border-gray-700 text-right">
                       ฿{gtAmount.toFixed(2)}
+                    </td>
+                    <td className="p-2 border-r border-gray-700 text-right text-orange-300">
+                      {gtDiscount > 0 ? `-฿${gtDiscount.toFixed(2)}` : '—'}
+                    </td>
+                    <td className="p-2 border-r border-gray-700 text-right">
+                      ฿{gtNet.toFixed(2)}
                     </td>
                     <td className="p-2 border-r border-gray-700 text-right">
                       ฿{gtCost.toFixed(2)}

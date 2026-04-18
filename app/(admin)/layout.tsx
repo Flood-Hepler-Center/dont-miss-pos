@@ -3,13 +3,11 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/stores/authStore';
-import { useLateBookingsCount } from '@/lib/hooks/useLateBookingsCount';
 import { 
   LayoutDashboard, 
   ShoppingCart, 
   UtensilsCrossed, 
   Table, 
-  Calendar, 
   FileText, 
   BarChart3, 
   Settings, 
@@ -43,16 +41,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, role, logout, _hasHydrated } = useAuthStore();
-  const lateBookingsCount = useLateBookingsCount();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
   const priorityItems: NavItem[] = [
+    { label: 'DASHBOARD', path: '/admin/dashboard', icon: LayoutDashboard },
     { label: 'CASHIER', path: '/admin/cashier', icon: CreditCard },
     { label: 'TABLE STATUS', path: '/admin/table-status', icon: Table },
     { label: 'LIVE ORDERS', path: '/admin/live-orders', icon: ShoppingCart },
     { label: 'KITCHEN KDS', path: '/admin/kds', icon: ChefHat },
-    { label: 'BOOKINGS', path: '/admin/bookings', icon: Calendar, badge: lateBookingsCount },
     { label: 'MENU ITEMS', path: '/admin/menu/items', icon: UtensilsCrossed },
   ];
 
@@ -60,7 +57,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     {
       title: 'MANAGEMENT',
       items: [
-        { label: 'DASHBOARD', path: '/admin/dashboard', icon: LayoutDashboard },
         { label: 'ALL ORDERS', path: '/admin/orders', icon: FileText },
         { label: 'ANALYTICS', path: '/admin/analytics', icon: BarChart3 },
         { label: 'REPORTS', path: '/admin/reports', icon: FileText },
