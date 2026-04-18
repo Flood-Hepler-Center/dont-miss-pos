@@ -66,6 +66,8 @@ export function TableSelector({ onTableSelect }: TableSelectorProps) {
     onTableSelect(table, orders);
   };
 
+  const activeTables = tables.filter((table) => (tableOrders.get(table.id) || []).length > 0);
+
   if (loading) {
     return (
       <div className="flex justify-center items-center py-20 font-mono">
@@ -76,7 +78,7 @@ export function TableSelector({ onTableSelect }: TableSelectorProps) {
     );
   }
 
-  if (tables.length === 0) {
+  if (activeTables.length === 0) {
     return (
       <div className="border-2 border-black p-12 text-center font-mono">
         <p className="text-sm">NO TABLES WITH ORDERS</p>
@@ -90,7 +92,7 @@ export function TableSelector({ onTableSelect }: TableSelectorProps) {
         <p className="text-xs text-center font-bold">[ SELECT TABLE TO PROCESS PAYMENT ]</p>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-        {tables.map((table) => {
+        {activeTables.map((table) => {
           const orders = tableOrders.get(table.id) || [];
           const orderCount = orders.length;
           

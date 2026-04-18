@@ -24,6 +24,7 @@ export function NoTableOrderSelector({ onOrderSelect }: NoTableOrderSelectorProp
       const ordersData = snapshot.docs
         .map((doc) => ({ id: doc.id, ...doc.data() } as Order))
         .filter((order) => {
+          if (order.isDeleted) return false;
           if (order.orderType === 'TAKE_AWAY') {
             return true;
           }
