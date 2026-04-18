@@ -15,7 +15,8 @@ import type {
   PaymentDetailReport,
   UltimateReport,
   UltimatePaymentDetail,
-  CategoryItemBreakdownReport
+  CategoryItemBreakdownReport,
+  SummaryOrderByDayReport
 } from '@/lib/services/reports.service';
 import { message } from 'antd';
 import type { SelectedModifier } from '@/types';
@@ -42,6 +43,7 @@ interface UltimateReportRow {
 }
 
 const REPORT_TYPES = [
+  { value: 'summary_by_day', label: '★ SUMMARY ORDER BY DAY (Recipe Cost + GP%)' },
   { value: 'ultimate', label: 'ULTIMATE FULL DETAIL (Revenue + Orders + Items)' },
   { value: 'eod', label: 'END OF DAY SUMMARY' },
   { value: 'sales', label: 'SALES BREAKDOWN' },
@@ -56,7 +58,7 @@ const REPORT_TYPES = [
 ];
 
 export default function ReportsPage() {
-  const [reportType, setReportType] = useState('ultimate');
+  const [reportType, setReportType] = useState('summary_by_day');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reportData, setReportData] = useState<
@@ -71,6 +73,7 @@ export default function ReportsPage() {
     | PaymentDetailReport
     | UltimateReport
     | CategoryItemBreakdownReport
+    | SummaryOrderByDayReport
     | null
   >(null);
   const [loading, setLoading] = useState(false);
@@ -88,8 +91,13 @@ export default function ReportsPage() {
       message.error('Please select a date for EOD report');
       return;
     }
-    
-    if (reportType !== 'eod' && (!startDate || !endDate)) {
+
+    if (reportType === 'summary_by_day' && !startDate) {
+      message.error('Please select a date for the day summary');
+      return;
+    }
+
+    if (!['eod', 'summary_by_day'].includes(reportType) && (!startDate || !endDate)) {
       message.error('Please select start and end dates');
       return;
     }
@@ -137,6 +145,9 @@ export default function ReportsPage() {
         case 'category_breakdown':
           data = await reportsService.generateCategoryItemBreakdownReport(start, end, selectedCategory);
           break;
+        case 'summary_by_day':
+          data = await reportsService.generateSummaryByDayReport(start, end);
+          break;
         default:
           throw new Error('Invalid report type');
       }
@@ -156,7 +167,69 @@ export default function ReportsPage() {
     if (!reportData) return;
 
     let csv = '';
-    
+
+    // Summary Order by Day: side-by-side source POS + pivot
+    if (reportType === 'summary_by_day' && 'lines' in reportData && 'pivot' in reportData) {
+      const data = reportData as SummaryOrderByDayReport;
+      const maxRows = Math.max(data.lines.length, data.pivot.length);
+
+      const header = [
+        'Source POS — Table', 'Time', 'Payment', 'Menu', 'Quantity', 'Amount', 'Cost', 'GP%',
+        '', // separator
+        'Pivot — Table', 'Time Payment', 'Sum of Amount', 'Sum of Cost', 'Avg GP%'
+      ].join(',');
+
+      const dataRows: string[] = [];
+      for (let i = 0; i < maxRows; i++) {
+        const line = data.lines[i];
+        const pivot = data.pivot[i];
+
+        const lineCells = line
+          ? [
+              line.tableId,
+              line.paymentTime,
+              line.paymentMethod,
+              `"${line.menuItemName.replace(/"/g, '""')}"`,
+              line.quantity,
+              line.amount.toFixed(2),
+              line.cost.toFixed(2),
+              `${line.gpPercent.toFixed(1)}%`,
+            ]
+          : ['', '', '', '', '', '', '', ''];
+
+        const pivotCells = pivot
+          ? [
+              pivot.tableId,
+              pivot.paymentTime,
+              pivot.sumAmount.toFixed(2),
+              pivot.sumCost.toFixed(2),
+              `${pivot.avgGP.toFixed(1)}%`,
+            ]
+          : ['', '', '', '', ''];
+
+        dataRows.push([...lineCells, '', ...pivotCells].join(','));
+      }
+
+      // Grand total row on the pivot side
+      dataRows.push([
+        '', '', '', '', '', '', '', '',
+        '',
+        'GRAND TOTAL', '',
+        data.grandTotal.sumAmount.toFixed(2),
+        data.grandTotal.sumCost.toFixed(2),
+        `${data.grandTotal.avgGP.toFixed(1)}%`,
+      ].join(','));
+
+      const csvContent = [header, ...dataRows].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `summary_order_by_day_${format(new Date(), 'yyyyMMdd')}.csv`;
+      a.click();
+      return;
+    }
+
     // Existing summary reports
     if ('totalRevenue' in reportData && !('orders' in reportData)) {
       csv = [
@@ -307,6 +380,161 @@ export default function ReportsPage() {
 
   const renderReportContent = () => {
     if (!reportData) return null;
+
+    if (reportType === 'summary_by_day' && 'lines' in reportData && 'pivot' in reportData) {
+      const data = reportData as SummaryOrderByDayReport;
+      const gtAmount = data.grandTotal.sumAmount;
+      const gtCost = data.grandTotal.sumCost;
+      const gtGP = data.grandTotal.avgGP;
+
+      return (
+        <div className="space-y-6">
+          {/* Header / Summary stats */}
+          <div className="border-2 border-black p-4 bg-gray-50">
+            <h3 className="font-bold text-sm mb-1 uppercase">★ Summary Order by Day</h3>
+            <p className="text-[10px] text-gray-500 mb-3 italic">
+              Recipe cost linked from BOM (inventory stock items). GP% = (Amount − Cost) / Amount.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="border-2 border-black p-3 text-center bg-white">
+                <p className="text-xs mb-1">TOTAL AMOUNT</p>
+                <p className="text-xl font-bold">฿{gtAmount.toFixed(2)}</p>
+              </div>
+              <div className="border-2 border-black p-3 text-center bg-white">
+                <p className="text-xs mb-1">TOTAL COST</p>
+                <p className="text-xl font-bold text-red-600">฿{gtCost.toFixed(2)}</p>
+              </div>
+              <div className="border-2 border-black p-3 text-center bg-white">
+                <p className="text-xs mb-1">GROSS PROFIT</p>
+                <p className="text-xl font-bold text-green-700">฿{(gtAmount - gtCost).toFixed(2)}</p>
+              </div>
+              <div className="border-2 border-black p-3 text-center bg-white">
+                <p className="text-xs mb-1">AVG GP%</p>
+                <p className="text-xl font-bold">{gtGP.toFixed(1)}%</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Source POS - Line items */}
+          <div className="border-2 border-black">
+            <div className="border-b-2 border-black p-3 bg-black text-white">
+              <h3 className="font-bold text-xs uppercase">Source POS — Order Lines ({data.lines.length})</h3>
+              <p className="text-[10px] opacity-70 italic">Link from BOM (recipe → inventory)</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[11px]">
+                <thead className="bg-gray-100 border-b-2 border-black">
+                  <tr>
+                    <th className="p-2 border-r border-gray-300">TABLE</th>
+                    <th className="p-2 border-r border-gray-300">TIME</th>
+                    <th className="p-2 border-r border-gray-300">PAYMENT</th>
+                    <th className="p-2 border-r border-gray-300">MENU</th>
+                    <th className="p-2 border-r border-gray-300 text-right">QTY</th>
+                    <th className="p-2 border-r border-gray-300 text-right">AMOUNT</th>
+                    <th className="p-2 border-r border-gray-300 text-right">COST</th>
+                    <th className="p-2 text-right">GP%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.lines.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="p-4 text-center text-gray-500 italic">
+                        No paid orders found for the selected date.
+                      </td>
+                    </tr>
+                  )}
+                  {data.lines.map((line, idx) => (
+                    <tr key={idx} className="border-b border-gray-200 hover:bg-yellow-50">
+                      <td className="p-2 border-r border-gray-200 font-bold">{line.tableId}</td>
+                      <td className="p-2 border-r border-gray-200">{line.paymentTime}</td>
+                      <td className="p-2 border-r border-gray-200 text-[10px]">{line.paymentMethod}</td>
+                      <td className="p-2 border-r border-gray-200">{line.menuItemName}</td>
+                      <td className="p-2 border-r border-gray-200 text-right">{line.quantity}</td>
+                      <td className="p-2 border-r border-gray-200 text-right font-bold">
+                        ฿{line.amount.toFixed(2)}
+                      </td>
+                      <td className="p-2 border-r border-gray-200 text-right text-red-600">
+                        ฿{line.cost.toFixed(2)}
+                      </td>
+                      <td
+                        className={`p-2 text-right font-bold ${
+                          line.gpPercent >= 60
+                            ? 'text-green-700'
+                            : line.gpPercent >= 40
+                            ? 'text-yellow-700'
+                            : 'text-red-600'
+                        }`}
+                      >
+                        {line.gpPercent.toFixed(0)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Pivot - by Table & Time */}
+          <div className="border-2 border-black">
+            <div className="border-b-2 border-black p-3 bg-black text-white">
+              <h3 className="font-bold text-xs uppercase">Auto Cal by Table (Pivot) — {data.pivot.length} groups</h3>
+              <p className="text-[10px] opacity-70 italic">Grouped by Table + Time Payment</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[11px]">
+                <thead className="bg-gray-100 border-b-2 border-black">
+                  <tr>
+                    <th className="p-2 border-r border-gray-300">TABLE</th>
+                    <th className="p-2 border-r border-gray-300">TIME PAYMENT</th>
+                    <th className="p-2 border-r border-gray-300 text-right">SUM OF AMOUNT</th>
+                    <th className="p-2 border-r border-gray-300 text-right">SUM OF COST</th>
+                    <th className="p-2 text-right">AVG GP%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.pivot.map((row) => (
+                    <tr key={row.key} className="border-b border-gray-200">
+                      <td className="p-2 border-r border-gray-200 font-bold">{row.tableId}</td>
+                      <td className="p-2 border-r border-gray-200">{row.paymentTime}</td>
+                      <td className="p-2 border-r border-gray-200 text-right font-bold">
+                        ฿{row.sumAmount.toFixed(2)}
+                      </td>
+                      <td className="p-2 border-r border-gray-200 text-right text-red-600">
+                        ฿{row.sumCost.toFixed(2)}
+                      </td>
+                      <td
+                        className={`p-2 text-right font-bold ${
+                          row.avgGP >= 60
+                            ? 'text-green-700'
+                            : row.avgGP >= 40
+                            ? 'text-yellow-700'
+                            : 'text-red-600'
+                        }`}
+                      >
+                        {row.avgGP.toFixed(1)}%
+                      </td>
+                    </tr>
+                  ))}
+                  {/* Grand Total Row */}
+                  <tr className="bg-black text-white font-bold">
+                    <td className="p-2 border-r border-gray-700" colSpan={2}>
+                      GRAND TOTAL
+                    </td>
+                    <td className="p-2 border-r border-gray-700 text-right">
+                      ฿{gtAmount.toFixed(2)}
+                    </td>
+                    <td className="p-2 border-r border-gray-700 text-right">
+                      ฿{gtCost.toFixed(2)}
+                    </td>
+                    <td className="p-2 text-right">{gtGP.toFixed(1)}%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     if (reportType === 'ultimate' && 'payments' in reportData) {
       const data = reportData as UltimateReport;

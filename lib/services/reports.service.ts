@@ -153,6 +153,46 @@ export interface CategoryItemBreakdownReport {
   groups: CategoryBreakdownGroup[];
 }
 
+/**
+ * Summary Order by Day report
+ * Each row = one paid order line with recipe cost + GP%
+ * Pivot = aggregated by (tableId, paymentTime)
+ */
+export interface SummaryOrderLine {
+  paymentId: string;
+  receiptNumber: string;
+  tableId: string;
+  paymentTime: string; // formatted like "7:00 PM"
+  paymentTimeSort: string; // ISO for sorting
+  paymentMethod: string;
+  menuItemName: string;
+  modifiersText: string;
+  quantity: number;
+  amount: number;
+  cost: number;
+  gpPercent: number;
+}
+
+export interface SummaryPivotRow {
+  key: string; // tableId + paymentTime
+  tableId: string;
+  paymentTime: string;
+  sumAmount: number;
+  sumCost: number;
+  avgGP: number;
+  lineCount: number;
+}
+
+export interface SummaryOrderByDayReport {
+  lines: SummaryOrderLine[];
+  pivot: SummaryPivotRow[];
+  grandTotal: {
+    sumAmount: number;
+    sumCost: number;
+    avgGP: number;
+  };
+}
+
 export const reportsService = {
   /**
    * Generate End of Day report
@@ -806,6 +846,197 @@ export const reportsService = {
       };
     } catch (error) {
       console.error('Error generating category item breakdown report:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Generate Summary Order by Day report
+   * - Flat list: each paid order line with recipe cost & GP%
+   * - Pivot: aggregated by (tableId, paymentTime)
+   */
+  async generateSummaryByDayReport(startDate: Date, endDate: Date): Promise<SummaryOrderByDayReport> {
+    try {
+      // 1. Fetch payments for range
+      const paymentsQuery = query(
+        collection(db, 'payments'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+      const paymentsSnapshot = await getDocs(paymentsQuery);
+      const payments = (paymentsSnapshot.docs.map(doc => {
+        const data = doc.data() as Payment;
+        return { ...data, id: doc.id };
+      }) as (Payment & { id: string })[]).filter(p => !p.isDeleted && p.status !== 'VOIDED');
+
+      // 2. Fetch orders for range
+      const ordersQuery = query(
+        collection(db, 'orders'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+      const ordersSnapshot = await getDocs(ordersQuery);
+      const ordersMap = new Map<string, Order & { id: string }>();
+      ordersSnapshot.docs.forEach(doc => {
+        const data = doc.data() as Order;
+        if (!data.isDeleted) {
+          ordersMap.set(doc.id, { ...data, id: doc.id });
+        }
+      });
+
+      // 3. Fetch menu items (for costPrice fallback)
+      const menuItemsSnapshot = await getDocs(collection(db, 'menuItems'));
+      const menuItemsMap = new Map<string, { costPrice?: number; name: string }>();
+      menuItemsSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        menuItemsMap.set(doc.id, { costPrice: data.costPrice || 0, name: data.name });
+      });
+
+      // 4. Fetch recipes (for BOM-based cost calc)
+      const recipesSnapshot = await getDocs(collection(db, 'recipes'));
+      const recipesByMenuItemId = new Map<string, { ingredients: Array<{ inventoryItemId: string; quantity: number }>; yield: number; isActive: boolean }>();
+      recipesSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.isActive !== false && data.menuItemId) {
+          recipesByMenuItemId.set(data.menuItemId, {
+            ingredients: data.ingredients || [],
+            yield: data.yield || 1,
+            isActive: data.isActive !== false,
+          });
+        }
+      });
+
+      // 5. Fetch inventory items (for unit cost)
+      const inventorySnapshot = await getDocs(collection(db, 'inventory'));
+      const inventoryCostMap = new Map<string, number>();
+      inventorySnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        inventoryCostMap.set(doc.id, data.costPerUnit || data.unitCost || 0);
+      });
+
+      // Helper: calculate cost per serving for a menu item
+      const getCostPerServing = (menuItemId: string, recipeMultiplier: number = 1): number => {
+        const recipe = recipesByMenuItemId.get(menuItemId);
+        if (recipe && recipe.ingredients.length > 0) {
+          let totalCost = 0;
+          recipe.ingredients.forEach(ing => {
+            const unitCost = inventoryCostMap.get(ing.inventoryItemId) || 0;
+            totalCost += ing.quantity * unitCost;
+          });
+          return (totalCost / (recipe.yield || 1)) * recipeMultiplier;
+        }
+        // Fallback to menuItem.costPrice
+        const menuItem = menuItemsMap.get(menuItemId);
+        return (menuItem?.costPrice || 0) * recipeMultiplier;
+      };
+
+      // 6. Build line items
+      const lines: SummaryOrderLine[] = [];
+
+      payments.forEach(pay => {
+        const processedAt = pay.processedAt instanceof Timestamp
+          ? pay.processedAt.toDate()
+          : pay.processedAt ? new Date(pay.processedAt) : new Date();
+        const paymentTime = processedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        const paymentTimeSort = processedAt.toISOString();
+
+        const linkedOrders = (pay.orderIds || [])
+          .map((id: string) => ordersMap.get(id))
+          .filter(Boolean) as (Order & { id: string })[];
+
+        linkedOrders.forEach(order => {
+          order.items?.forEach(item => {
+            if (item.isVoided) return;
+
+            // Determine recipe multiplier from modifiers
+            let recipeMultiplier = 1;
+            if (item.modifiers && item.modifiers.length > 0) {
+              const mod = item.modifiers.find(m => m.recipeMultiplier && m.recipeMultiplier > 0);
+              if (mod && mod.recipeMultiplier) recipeMultiplier = mod.recipeMultiplier;
+            }
+
+            const costPerServing = getCostPerServing(item.menuItemId, recipeMultiplier);
+            const lineCost = costPerServing * item.quantity;
+            const amount = item.subtotal || (item.price * item.quantity);
+            const gpPercent = amount > 0 ? ((amount - lineCost) / amount) * 100 : 0;
+
+            const modifiersText = item.modifiers && item.modifiers.length > 0
+              ? item.modifiers.map(m => m.optionName).join(' + ')
+              : '';
+
+            lines.push({
+              paymentId: pay.id,
+              receiptNumber: pay.receiptNumber || 'N/A',
+              tableId: pay.tableId || order.tableId || 'N/A',
+              paymentTime,
+              paymentTimeSort,
+              paymentMethod: pay.paymentMethod || 'N/A',
+              menuItemName: modifiersText ? `${item.name} + ${modifiersText}` : item.name,
+              modifiersText,
+              quantity: item.quantity,
+              amount,
+              cost: lineCost,
+              gpPercent,
+            });
+          });
+        });
+      });
+
+      // Sort by paymentTime, then tableId
+      lines.sort((a, b) => {
+        if (a.paymentTimeSort !== b.paymentTimeSort) return a.paymentTimeSort.localeCompare(b.paymentTimeSort);
+        return a.tableId.localeCompare(b.tableId);
+      });
+
+      // 7. Build pivot (grouped by tableId + paymentTime)
+      const pivotMap = new Map<string, SummaryPivotRow>();
+      lines.forEach(line => {
+        const key = `${line.tableId}||${line.paymentTime}`;
+        let row = pivotMap.get(key);
+        if (!row) {
+          row = {
+            key,
+            tableId: line.tableId,
+            paymentTime: line.paymentTime,
+            sumAmount: 0,
+            sumCost: 0,
+            avgGP: 0,
+            lineCount: 0,
+          };
+          pivotMap.set(key, row);
+        }
+        row.sumAmount += line.amount;
+        row.sumCost += line.cost;
+        row.lineCount += 1;
+      });
+
+      const pivot = Array.from(pivotMap.values()).map(row => ({
+        ...row,
+        avgGP: row.sumAmount > 0 ? ((row.sumAmount - row.sumCost) / row.sumAmount) * 100 : 0,
+      }));
+
+      // Sort pivot by table then time
+      pivot.sort((a, b) => {
+        if (a.tableId !== b.tableId) return a.tableId.localeCompare(b.tableId);
+        return a.paymentTime.localeCompare(b.paymentTime);
+      });
+
+      // 8. Grand total
+      const grandSumAmount = pivot.reduce((s, r) => s + r.sumAmount, 0);
+      const grandSumCost = pivot.reduce((s, r) => s + r.sumCost, 0);
+      const grandAvgGP = grandSumAmount > 0 ? ((grandSumAmount - grandSumCost) / grandSumAmount) * 100 : 0;
+
+      return {
+        lines,
+        pivot,
+        grandTotal: {
+          sumAmount: grandSumAmount,
+          sumCost: grandSumCost,
+          avgGP: grandAvgGP,
+        },
+      };
+    } catch (error) {
+      console.error('Error generating summary by day report:', error);
       throw error;
     }
   },

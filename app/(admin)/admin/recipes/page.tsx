@@ -56,6 +56,7 @@ export default function RecipesPage() {
           name: data.name,
           currentStock: data.currentStock,
           unit: data.unit,
+          unitCost: data.costPerUnit || data.unitCost || 0,
         };
       }) as InventoryItem[];
       setInventoryItems(inventoryData);
@@ -143,12 +144,29 @@ export default function RecipesPage() {
         isActive: true,
       };
 
+      // Calculate cost per serving
+      let totalCost = 0;
+      formData.ingredients.forEach(ing => {
+        const invItem = inventoryItems.find(i => i.id === ing.inventoryItemId);
+        if (invItem && invItem.unitCost) {
+          totalCost += (ing.quantity * invItem.unitCost);
+        }
+      });
+      const costPerServing = totalCost / (formData.yield || 1);
+
       if (editingRecipe) {
         await updateDoc(doc(db, 'recipes', editingRecipe.id), recipeData);
       } else {
         const newRecipeRef = doc(collection(db, 'recipes'));
         await setDoc(newRecipeRef, recipeData);
       }
+
+      // Sync cost to MenuItem
+      await updateDoc(doc(db, 'menuItems', formData.menuItemId), {
+        costPrice: costPerServing,
+        updatedAt: new Date()
+      });
+
       setModalVisible(false);
       setFormData({ menuItemId: '', ingredients: [], yield: 1 });
     } catch (error) {
@@ -169,13 +187,14 @@ export default function RecipesPage() {
     }
   };
 
-  const checkAvailability = (recipe: Recipe): { available: boolean; missing: string[]; maxServings: number } => {
+  const checkAvailability = (recipe: Recipe): { available: boolean; missing: string[]; maxServings: number; costPerServing: number } => {
     const missing: string[] = [];
     let maxServings = Infinity;
     const recipeYield = recipe.yield || 1;
+    let totalCost = 0;
 
     if (!recipe.ingredients || recipe.ingredients.length === 0) {
-      return { available: false, missing: ['No ingredients defined'], maxServings: 0 };
+      return { available: false, missing: ['No ingredients defined'], maxServings: 0, costPerServing: 0 };
     }
 
     recipe.ingredients.forEach((ingredient) => {
@@ -186,6 +205,10 @@ export default function RecipesPage() {
         missing.push(ingredient.inventoryItemName);
         maxServings = 0;
         return;
+      }
+
+      if (invItem.unitCost) {
+        totalCost += (ingredient.quantity * invItem.unitCost);
       }
 
       if (quantityPerServing > 0) {
@@ -201,7 +224,7 @@ export default function RecipesPage() {
 
     if (maxServings === Infinity) maxServings = 0;
 
-    return { available: maxServings >= 1, missing, maxServings };
+    return { available: maxServings >= 1, missing, maxServings, costPerServing: totalCost / recipeYield };
   };
 
   return (
@@ -230,9 +253,10 @@ export default function RecipesPage() {
         {/* Recipes List - Desktop */}
         <div className="hidden md:block border-2 border-black mb-6">
           <div className="border-b-2 border-black p-3 bg-white">
-            <div className="grid grid-cols-5 gap-4 text-xs font-bold">
+            <div className="grid grid-cols-6 gap-4 text-xs font-bold">
               <div>MENU ITEM</div>
               <div>INGREDIENTS</div>
+              <div>COST / SERVING</div>
               <div>INVENTORY STATUS</div>
               <div className="text-center flex flex-col justify-center leading-tight">
                 <span>AVAILABLE</span>
@@ -243,17 +267,37 @@ export default function RecipesPage() {
           </div>
           <div className="divide-y-2 divide-black">
             {recipes.map((recipe) => {
-              const { available, missing, maxServings } = checkAvailability(recipe);
+              const { available, missing, maxServings, costPerServing } = checkAvailability(recipe);
+              const menuItem = menuItems.find(i => i.id === recipe.menuItemId);
+              const margin = menuItem && menuItem.price && costPerServing
+                ? ((menuItem.price - costPerServing) / menuItem.price * 100).toFixed(1)
+                : null;
+
               return (
                 <div key={recipe.id} className="p-3 hover:bg-gray-50">
-                  <div className="grid grid-cols-5 gap-4 text-sm items-center">
-                    <div className="font-bold">{recipe.menuItemName}</div>
+                  <div className="grid grid-cols-6 gap-4 text-sm items-center">
+                    <div className="font-bold">
+                      {recipe.menuItemName}
+                      {menuItem && (
+                        <div className="text-[10px] font-normal text-gray-500">
+                          Price: ฿{menuItem.price.toFixed(2)}
+                        </div>
+                      )}
+                    </div>
                     <div className="text-xs">
                       {recipe.ingredients.map((ing, idx) => (
                         <div key={idx}>
                           {ing.quantity} {ing.unit} {ing.inventoryItemName}
                         </div>
                       ))}
+                    </div>
+                    <div className="font-bold">
+                      ฿{costPerServing.toFixed(2)}
+                      {margin && (
+                        <div className="text-[10px] font-normal text-gray-500">
+                          Margin: {margin}%
+                        </div>
+                      )}
                     </div>
                     <div className="text-xs">
                       {missing.length > 0 ? (
@@ -298,19 +342,45 @@ export default function RecipesPage() {
         {/* Recipes List - Mobile */}
         <div className="md:hidden space-y-3">
           {recipes.map((recipe) => {
-            const { available, missing, maxServings } = checkAvailability(recipe);
             return (
               <div key={recipe.id} className="border-2 border-black p-4">
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <p className="font-bold text-sm">{recipe.menuItemName}</p>
-                    <span
-                      className={`inline-block mt-1 px-2 py-1 border-2 border-black text-[10px] font-bold ${
-                        available ? 'bg-green-100' : 'bg-red-100'
-                      }`}
-                    >
-                      {available ? '✓ AVAILABLE' : '✗ UNAVAILABLE'} • {maxServings} SERVES
-                    </span>
+                    {(() => {
+                      const { available, maxServings, costPerServing, missing } = checkAvailability(recipe);
+                      const menuItem = menuItems.find(i => i.id === recipe.menuItemId);
+                      const margin = menuItem && menuItem.price && costPerServing
+                        ? ((menuItem.price - costPerServing) / menuItem.price * 100).toFixed(1)
+                        : null;
+                      
+                      return (
+                        <>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            <span
+                              className={`inline-block px-2 py-1 border-2 border-black text-[10px] font-bold ${
+                                available ? 'bg-green-100' : 'bg-red-100'
+                              }`}
+                            >
+                              {available ? '✓ AVAILABLE' : '✗ UNAVAILABLE'} • {maxServings} SERVES
+                            </span>
+                            <span className="inline-block px-2 py-1 border-2 border-black text-[10px] font-bold bg-yellow-50">
+                              COST: ฿{costPerServing.toFixed(2)}
+                            </span>
+                            {margin && (
+                              <span className="inline-block px-2 py-1 border-2 border-black text-[10px] font-bold bg-blue-50">
+                                MARGIN: {margin}%
+                              </span>
+                            )}
+                          </div>
+                          {missing.length > 0 && (
+                            <div className="text-[10px] text-red-600 mt-2 font-bold">
+                              Missing: {missing.join(', ')}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
                 <div className="text-xs mb-3">
@@ -321,11 +391,6 @@ export default function RecipesPage() {
                     </div>
                   ))}
                 </div>
-                {missing.length > 0 && (
-                  <div className="text-xs text-red-600 mb-3">
-                    Missing: {missing.join(', ')}
-                  </div>
-                )}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => handleEdit(recipe)}
@@ -380,15 +445,41 @@ export default function RecipesPage() {
 
                 <div>
                   <label className="block text-xs font-bold mb-2">YIELD (SERVINGS PER RECIPE) *</label>
-                  <input
-                    type="number"
-                    value={formData.yield}
-                    onChange={(e) => setFormData({ ...formData, yield: parseFloat(e.target.value) || 1 })}
-                    className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
-                    min={0.1}
-                    step={0.1}
-                    required
-                  />
+                  <div className="grid grid-cols-2 gap-4">
+                    <input
+                      type="number"
+                      value={formData.yield}
+                      onChange={(e) => setFormData({ ...formData, yield: parseFloat(e.target.value) || 1 })}
+                      className="w-full px-3 py-2 border-2 border-black text-sm focus:outline-none"
+                      min={0.1}
+                      step={0.1}
+                      required
+                    />
+                    {(() => {
+                      const tempRecipe = { ...formData, id: 'temp', menuItemName: '', isActive: true, createdAt: new Date(), updatedAt: new Date() } as Recipe;
+                      const { costPerServing } = checkAvailability(tempRecipe);
+                      const menuItem = menuItems.find(i => i.id === formData.menuItemId);
+                      const margin = menuItem && menuItem.price && costPerServing
+                        ? ((menuItem.price - costPerServing) / menuItem.price * 100).toFixed(1)
+                        : null;
+
+                      return (
+                        <div className="border-2 border-black p-2 bg-yellow-50 text-xs flex flex-col justify-center">
+                          <div className="font-bold text-center">COST PREVIEW</div>
+                          <div className="flex justify-between mt-1">
+                            <span>Cost/Serve:</span>
+                            <span className="font-bold text-lg">฿{costPerServing.toFixed(2)}</span>
+                          </div>
+                          {margin && (
+                            <div className="flex justify-between">
+                              <span>Margin:</span>
+                              <span className="font-bold">{margin}%</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
                   <p className="text-[10px] text-gray-500 mt-1 italic">Example: If this recipe makes 10 chicken pops, set yield to 10.</p>
                 </div>
 
@@ -404,54 +495,65 @@ export default function RecipesPage() {
                     </button>
                   </div>
                   <div className="border-2 border-black p-3 space-y-3">
-                    {formData.ingredients.map((ingredient, index) => (
-                      <div key={index} className="grid grid-cols-12 gap-2 items-end pb-3 border-b border-black last:border-0 last:pb-0">
-                        <div className="col-span-5">
-                          <label className="block text-xs mb-1">ITEM</label>
-                          <select
-                            value={ingredient.inventoryItemId}
-                            onChange={(e) => handleUpdateIngredient(index, 'inventoryItemId', e.target.value)}
-                            className="w-full px-2 py-1 border border-black text-xs focus:outline-none"
-                          >
-                            {inventoryItems.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name}
-                              </option>
-                            ))}
-                          </select>
+                    {formData.ingredients.map((ingredient, index) => {
+                      const invItem = inventoryItems.find(i => i.id === ingredient.inventoryItemId);
+                      const rowCost = invItem && invItem.unitCost ? (ingredient.quantity * invItem.unitCost) : 0;
+                      
+                      return (
+                        <div key={index} className="grid grid-cols-12 gap-2 items-end pb-3 border-b border-black last:border-0 last:pb-0">
+                          <div className="col-span-4">
+                            <label className="block text-[10px] mb-1">ITEM</label>
+                            <select
+                              value={ingredient.inventoryItemId}
+                              onChange={(e) => handleUpdateIngredient(index, 'inventoryItemId', e.target.value)}
+                              className="w-full px-2 py-1 border border-black text-xs focus:outline-none"
+                            >
+                              {inventoryItems.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-[10px] mb-1">QTY</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={ingredient.quantity}
+                              onChange={(e) =>
+                                handleUpdateIngredient(index, 'quantity', parseFloat(e.target.value) || 0)
+                              }
+                              className="w-full px-2 py-1 border border-black text-xs focus:outline-none"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-[10px] mb-1">UNIT</label>
+                            <input
+                              type="text"
+                              value={ingredient.unit}
+                              disabled
+                              className="w-full px-2 py-1 border border-black text-xs bg-gray-100"
+                            />
+                          </div>
+                          <div className="col-span-3">
+                            <label className="block text-[10px] mb-1 font-bold">COST</label>
+                            <div className="px-2 py-1 border border-black text-xs bg-gray-50 font-bold">
+                              ฿{rowCost.toFixed(2)}
+                            </div>
+                          </div>
+                          <div className="col-span-1 flex items-end">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveIngredient(index)}
+                              className="px-2 py-1 border border-black text-xs hover:bg-red-50"
+                            >
+                              ✗
+                            </button>
+                          </div>
                         </div>
-                        <div className="col-span-3">
-                          <label className="block text-xs mb-1">QTY</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={ingredient.quantity}
-                            onChange={(e) =>
-                              handleUpdateIngredient(index, 'quantity', parseFloat(e.target.value) || 0)
-                            }
-                            className="w-full px-2 py-1 border border-black text-xs focus:outline-none"
-                          />
-                        </div>
-                        <div className="col-span-3">
-                          <label className="block text-xs mb-1">UNIT</label>
-                          <input
-                            type="text"
-                            value={ingredient.unit}
-                            disabled
-                            className="w-full px-2 py-1 border border-black text-xs bg-gray-100"
-                          />
-                        </div>
-                        <div className="col-span-1 flex items-end">
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveIngredient(index)}
-                            className="px-2 py-1 border border-black text-xs hover:bg-red-50"
-                          >
-                            ✗
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {formData.ingredients.length === 0 && (
                       <p className="text-xs text-gray-600 text-center py-4">No ingredients added</p>
                     )}
