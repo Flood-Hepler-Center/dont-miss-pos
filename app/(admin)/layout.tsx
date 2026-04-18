@@ -20,10 +20,12 @@ import {
   Menu as MenuIcon,
   X,
   CreditCard,
-  ChefHat
+  ChefHat,
+  Calendar
 } from 'lucide-react';
 
 import { LucideIcon } from 'lucide-react';
+import { useLateBookingsCount } from '@/lib/hooks/useLateBookingsCount';
 
 type NavItem = {
   label: string;
@@ -43,10 +45,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const { isAuthenticated, role, logout, _hasHydrated } = useAuthStore();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const lateBookingsCount = useLateBookingsCount();
 
   const priorityItems: NavItem[] = [
     { label: 'DASHBOARD', path: '/admin/dashboard', icon: LayoutDashboard },
     { label: 'CASHIER', path: '/admin/cashier', icon: CreditCard },
+    { label: 'BOOKINGS', path: '/admin/bookings', icon: Calendar, badge: lateBookingsCount },
     { label: 'TABLE STATUS', path: '/admin/table-status', icon: Table },
     { label: 'LIVE ORDERS', path: '/admin/live-orders', icon: ShoppingCart },
     { label: 'KITCHEN KDS', path: '/admin/kds', icon: ChefHat },
