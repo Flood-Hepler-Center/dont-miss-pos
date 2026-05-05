@@ -549,6 +549,8 @@ export default function ExpenseUploadPage() {
         aiJobId: activeJobId,
         receiptImageUrl: activeImageUrl,
         receiptImagePath: activeImagePath,
+        paidBy: 'restaurant',
+        paybackStatus: 'not_required',
       });
 
       await expenseLineService.bulkCreate(

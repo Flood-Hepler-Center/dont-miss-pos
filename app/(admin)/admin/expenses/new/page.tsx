@@ -8,7 +8,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase/config';
 import { expenseDocumentService, expenseLineService, expenseStatsService } from '@/lib/services/expense.service';
 import { useExpenseSKUs, useExpenseVendors } from '@/lib/hooks/useExpenses';
-import type { ExpenseSubCategory, PurchaseUnit, BaseUnit, ExpenseSKU } from '@/types/expense';
+import type { ExpenseSubCategory, PurchaseUnit, BaseUnit, ExpenseSKU, ExpensePaidBy } from '@/types/expense';
 
 const SUB_CATEGORIES: { value: ExpenseSubCategory; label: string; main: string }[] = [
   { value: 'capex_equipment', label: 'Equipment', main: 'CAPEX' },
@@ -106,6 +106,8 @@ export default function NewExpensePage() {
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<LineFormItem[]>([defaultLine()]);
   const [saving, setSaving] = useState(false);
+  const [paidBy, setPaidBy] = useState<ExpensePaidBy>('restaurant');
+  const [paidByName, setPaidByName] = useState('');
 
   const subtotal = lines.reduce((s, l) => s + l.subtotal, 0);
   const total = subtotal + taxAmount + serviceCharge;
@@ -170,6 +172,11 @@ export default function NewExpensePage() {
         currency: 'THB',
         isAiExtracted: false,
         requiresReview: false,
+        paidBy,
+        paidByName: paidBy !== 'restaurant' ? paidByName : undefined,
+        paybackStatus: paidBy === 'restaurant' ? 'not_required' : 'pending',
+        paybackAmount: paidBy !== 'restaurant' ? total : undefined,
+        paybackTo: paidBy !== 'restaurant' ? paidByName : undefined,
       });
 
       const docDate = new Date(documentDate);
@@ -301,14 +308,46 @@ export default function NewExpensePage() {
               />
             </div>
           </div>
-          <div className="mt-3">
-            <label className="text-[10px] font-bold text-gray-500 block mb-1">NOTES</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              className="w-full border-2 border-black px-3 py-2 text-sm font-mono resize-none"
-            />
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[10px] font-bold text-gray-500 block mb-1">NOTES</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                className="w-full border-2 border-black px-3 py-2 text-sm font-mono resize-none"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-gray-500 block mb-1">WHO PAID THIS EXPENSE?</label>
+              <select
+                value={paidBy}
+                onChange={(e) => setPaidBy(e.target.value as ExpensePaidBy)}
+                className="w-full border-2 border-black px-3 py-2 text-sm font-mono font-bold"
+              >
+                <option value="restaurant">🏪 RESTAURANT</option>
+                <option value="owner">👤 OWNER</option>
+                <option value="staff">🧑‍🍳 STAFF</option>
+              </select>
+              {paidBy !== 'restaurant' && (
+                <>
+                  <label className="text-[10px] font-bold text-gray-500 block mb-1 mt-2">
+                    {paidBy === 'owner' ? 'OWNER NAME' : 'STAFF NAME'}
+                  </label>
+                  <input
+                    value={paidByName}
+                    onChange={(e) => setPaidByName(e.target.value)}
+                    placeholder={paidBy === 'owner' ? 'e.g. คุณสมชาย, Partner A...' : 'e.g. พี่ต้น, น้องมิ้นท์...'}
+                    className="w-full border-2 border-black px-3 py-2 text-sm font-mono"
+                  />
+                </>
+              )}
+              {paidBy !== 'restaurant' && (
+                <p className="text-[9px] text-orange-600 font-bold mt-1">
+                  ⚠ Payback will be required — pay back to {paidByName || `(${paidBy} name)`}
+                </p>
+              )}
+            </div>
           </div>
         </div>
 

@@ -47,7 +47,7 @@ const MAIN_CATEGORY_LABELS: Record<string, string> = {
 function styleHeader(ws: ExcelJS.Worksheet, row: ExcelJS.Row, bgColor = '1F2937') {
   row.eachCell((cell) => {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${bgColor}` } };
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+    cell.font = { name: 'Tahoma', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
     cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
     cell.border = {
       top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
@@ -73,7 +73,7 @@ function styleDataRow(row: ExcelJS.Row, isEven: boolean) {
       left: { style: 'hair', color: { argb: 'FFE5E7EB' } },
       right: { style: 'hair', color: { argb: 'FFE5E7EB' } },
     };
-    cell.font = { size: 9 };
+    cell.font = { name: 'Tahoma', size: 9 };
   });
   row.height = 18;
 }
@@ -95,7 +95,7 @@ function buildSummarySheet(
   ws.mergeCells('A1:D1');
   const titleCell = ws.getCell('A1');
   titleCell.value = `Expense Summary Report — ${format(filter.startDate, 'dd MMM yyyy')} to ${format(filter.endDate, 'dd MMM yyyy')}`;
-  titleCell.font = { bold: true, size: 14, color: { argb: 'FF1F2937' } };
+  titleCell.font = { name: 'Tahoma', bold: true, size: 14, color: { argb: 'FF1F2937' } };
   titleCell.alignment = { horizontal: 'center' };
   ws.getRow(1).height = 32;
 
@@ -139,7 +139,7 @@ function buildSummarySheet(
   }
   const totalRow = ws.addRow(['', 'GRAND TOTAL', lines.length, THB(grandTotal)]);
   totalRow.eachCell((cell) => {
-    cell.font = { bold: true, size: 10 };
+    cell.font = { name: 'Tahoma', bold: true, size: 10 };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
   });
   totalRow.getCell(4).numFmt = '#,##0.00';
@@ -190,6 +190,18 @@ function buildLineItemsSheet(wb: ExcelJS.Workbook, lines: ExpenseLine[], docs: E
 
   const docMap = new Map(docs.map((d) => [d.id, d]));
 
+  const PAID_BY_LABELS: Record<string, string> = {
+    restaurant: 'Restaurant',
+    owner: 'Owner',
+    staff: 'Staff',
+  };
+  const PAYBACK_STATUS_LABELS: Record<string, string> = {
+    not_required: 'N/A',
+    pending: 'Pending',
+    partial: 'Partial',
+    completed: 'Completed',
+  };
+
   const headers = [
     'Date',
     'Vendor',
@@ -208,6 +220,14 @@ function buildLineItemsSheet(wb: ExcelJS.Workbook, lines: ExpenseLine[], docs: E
     'Discount (฿)',
     'Final Amount (฿)',
     'Receipt No.',
+    'Paid By',
+    'Paid By Name',
+    'Payback Status',
+    'Payback Amount (฿)',
+    'Payback Date',
+    'Payback To',
+    'Payback Method',
+    'Payback Note',
     'AI Extracted',
     'AI Confidence',
     'Notes',
@@ -216,12 +236,12 @@ function buildLineItemsSheet(wb: ExcelJS.Workbook, lines: ExpenseLine[], docs: E
   const headerRow = ws.addRow(headers);
   styleHeader(ws, headerRow, '065F46');
 
-  const COL_WIDTHS = [12, 20, 16, 12, 14, 18, 12, 30, 12, 14, 12, 10, 14, 14, 12, 16, 14, 12, 14, 20];
+  const COL_WIDTHS = [12, 20, 16, 12, 14, 18, 12, 30, 12, 14, 12, 10, 14, 14, 12, 16, 14, 14, 16, 14, 16, 14, 16, 14, 20, 12, 14, 20];
   headers.forEach((_, idx) => {
     ws.getColumn(idx + 1).width = COL_WIDTHS[idx] ?? 14;
   });
 
-  ['M', 'N', 'O', 'P'].forEach((col) => currencyFormat(ws, col));
+  ['M', 'N', 'O', 'P', 'S'].forEach((col) => currencyFormat(ws, col));
   ws.getColumn('I').numFmt = '#,##0.###';
   ws.getColumn('K').numFmt = '#,##0.###';
 
@@ -246,6 +266,14 @@ function buildLineItemsSheet(wb: ExcelJS.Workbook, lines: ExpenseLine[], docs: E
       THB(line.discount),
       THB(line.finalAmount),
       parentDoc?.receiptNumber ?? '',
+      parentDoc ? (PAID_BY_LABELS[parentDoc.paidBy] ?? parentDoc.paidBy ?? 'Restaurant') : '',
+      parentDoc?.paidByName ?? '',
+      parentDoc ? (PAYBACK_STATUS_LABELS[parentDoc.paybackStatus] ?? parentDoc.paybackStatus ?? 'N/A') : '',
+      THB(parentDoc?.paybackAmount),
+      parentDoc?.paybackDate ? format(parentDoc.paybackDate, 'dd/MM/yyyy') : '',
+      parentDoc?.paybackTo ?? '',
+      parentDoc?.paybackMethod ?? '',
+      parentDoc?.paybackNote ?? '',
       line.isAiExtracted ? 'Yes' : 'No',
       line.aiConfidence != null ? `${Math.round((line.aiConfidence ?? 0) * 100)}%` : '',
       line.notes ?? '',
@@ -303,7 +331,7 @@ function buildCAPEXSheet(wb: ExcelJS.Workbook, lines: ExpenseLine[]) {
 
   ws.addRow([]);
   const totalRow = ws.addRow(['', '', '', '', 'CAPEX TOTAL', '', '', '', THB(capexTotal), '']);
-  totalRow.eachCell((cell) => { cell.font = { bold: true }; cell.numFmt = '#,##0.00'; });
+  totalRow.eachCell((cell) => { cell.font = { name: 'Tahoma', bold: true }; cell.numFmt = '#,##0.00'; });
 }
 
 // ─── Sheet 4: Inventory Cost Analysis ────────────────────────────────────────

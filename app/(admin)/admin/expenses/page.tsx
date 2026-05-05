@@ -23,6 +23,19 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.
   cancelled: { label: 'CANCELLED', color: 'bg-red-100 text-red-600', icon: <Trash2 size={10} /> },
 };
 
+const PAID_BY_CONFIG: Record<string, { label: string; color: string }> = {
+  restaurant: { label: 'RESTAURANT', color: 'bg-emerald-100 text-emerald-700' },
+  owner: { label: 'OWNER', color: 'bg-purple-100 text-purple-700' },
+  staff: { label: 'STAFF', color: 'bg-orange-100 text-orange-700' },
+};
+
+const PAYBACK_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  not_required: { label: 'N/A', color: 'bg-gray-100 text-gray-400' },
+  pending: { label: 'PENDING', color: 'bg-red-100 text-red-600' },
+  partial: { label: 'PARTIAL', color: 'bg-yellow-100 text-yellow-700' },
+  completed: { label: 'PAID BACK', color: 'bg-green-100 text-green-700' },
+};
+
 const QUICK_RANGES = [
   { label: 'THIS MONTH', start: startOfMonth(new Date()), end: endOfMonth(new Date()) },
   { label: 'LAST MONTH', start: startOfMonth(subMonths(new Date(), 1)), end: endOfMonth(subMonths(new Date(), 1)) },
@@ -249,6 +262,8 @@ export default function ExpensesPage() {
                 <th className="text-left px-4 py-3 font-bold border-r border-gray-200">VENDOR / PLACE</th>
                 <th className="text-left px-4 py-3 font-bold border-r border-gray-200">SOURCE</th>
                 <th className="text-left px-4 py-3 font-bold border-r border-gray-200">STATUS</th>
+                <th className="text-left px-4 py-3 font-bold border-r border-gray-200">PAID BY</th>
+                <th className="text-left px-4 py-3 font-bold border-r border-gray-200">PAYBACK</th>
                 <th className="text-right px-4 py-3 font-bold border-r border-gray-200">SUBTOTAL</th>
                 <th className="text-right px-4 py-3 font-bold border-r border-gray-200">TOTAL (฿)</th>
                 <th className="text-center px-4 py-3 font-bold">ACTIONS</th>
@@ -277,6 +292,34 @@ export default function ExpensesPage() {
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded ${statusCfg.color}`}>
                         {statusCfg.icon} {statusCfg.label}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 border-r border-gray-100">
+                      {(() => {
+                        const paidByCfg = PAID_BY_CONFIG[doc.paidBy] ?? PAID_BY_CONFIG.restaurant;
+                        return (
+                          <div>
+                            <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded ${paidByCfg.color}`}>
+                              {paidByCfg.label}
+                            </span>
+                            {doc.paidByName && <div className="text-[9px] text-gray-400 mt-0.5">{doc.paidByName}</div>}
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-4 py-3 border-r border-gray-100">
+                      {(() => {
+                        const paybackCfg = PAYBACK_STATUS_CONFIG[doc.paybackStatus] ?? PAYBACK_STATUS_CONFIG.not_required;
+                        return (
+                          <div>
+                            <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded ${paybackCfg.color}`}>
+                              {paybackCfg.label}
+                            </span>
+                            {doc.paybackAmount != null && doc.paybackAmount > 0 && (
+                              <div className="text-[9px] text-gray-400 mt-0.5 font-mono">฿{doc.paybackAmount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}</div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 border-r border-gray-100 text-right font-mono">
                       {doc.subtotal.toLocaleString('th-TH', { minimumFractionDigits: 2 })}

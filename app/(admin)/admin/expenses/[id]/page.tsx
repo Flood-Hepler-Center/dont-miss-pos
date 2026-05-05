@@ -29,6 +29,9 @@ import type {
   PurchaseUnit,
   BaseUnit,
   ExpenseSKU,
+  ExpensePaidBy,
+  ExpensePaybackStatus,
+  ExpensePaybackMethod,
 } from '@/types/expense';
 
 // ─── SKU Combobox ─────────────────────────────────────────────────────────────
@@ -137,6 +140,40 @@ const ALL_SUB_CATEGORIES: ExpenseSubCategory[] = [
 const PURCHASE_UNITS: PurchaseUnit[] = ['kg', 'g', 'L', 'ml', 'pack', 'box', 'case', 'bottle', 'can', 'bag', 'unit', 'piece', 'roll', 'sheet', 'set'];
 const BASE_UNITS: BaseUnit[] = ['g', 'ml', 'unit', 'piece', 'sheet', 'roll', 'cm', 'sqm'];
 
+const PAID_BY_OPTIONS: { value: ExpensePaidBy; label: string }[] = [
+  { value: 'restaurant', label: 'RESTAURANT' },
+  { value: 'owner', label: 'OWNER' },
+  { value: 'staff', label: 'STAFF' },
+];
+
+const PAYBACK_STATUS_OPTIONS: { value: ExpensePaybackStatus; label: string }[] = [
+  { value: 'not_required', label: 'NOT REQUIRED' },
+  { value: 'pending', label: 'PENDING' },
+  { value: 'partial', label: 'PARTIAL' },
+  { value: 'completed', label: 'COMPLETED' },
+];
+
+const PAYBACK_METHOD_OPTIONS: { value: ExpensePaybackMethod; label: string }[] = [
+  { value: 'cash', label: 'CASH' },
+  { value: 'transfer', label: 'BANK TRANSFER' },
+  { value: 'promptpay', label: 'PROMPTPAY' },
+  { value: 'offset', label: 'OFFSET / DEDUCT' },
+  { value: 'other', label: 'OTHER' },
+];
+
+const PAID_BY_STYLE: Record<string, string> = {
+  restaurant: 'border-emerald-400 bg-emerald-50 text-emerald-700',
+  owner: 'border-purple-400 bg-purple-50 text-purple-700',
+  staff: 'border-orange-400 bg-orange-50 text-orange-700',
+};
+
+const PAYBACK_STATUS_STYLE: Record<string, string> = {
+  not_required: 'text-gray-400',
+  pending: 'text-red-600',
+  partial: 'text-yellow-700',
+  completed: 'text-green-700',
+};
+
 // ─── Editable line type ───────────────────────────────────────────────────────
 
 type EditLine = ExpenseLine & { _isNew?: boolean; _deleted?: boolean };
@@ -216,6 +253,15 @@ export default function ExpenseDetailPage({ params }: Props) {
       serviceCharge: document.serviceCharge,
       total: document.total,
       notes: document.notes ?? '',
+      paidBy: document.paidBy ?? 'restaurant',
+      paidByName: document.paidByName ?? '',
+      paybackStatus: document.paybackStatus ?? 'not_required',
+      paybackAmount: document.paybackAmount ?? 0,
+      paybackDate: document.paybackDate,
+      paybackTo: document.paybackTo ?? '',
+      paybackMethod: document.paybackMethod,
+      paybackNote: document.paybackNote ?? '',
+      paybackBy: document.paybackBy ?? '',
     });
     setEditLines(lines.map((l) => ({ ...l })));
     originalLinesRef.current = lines;
@@ -277,6 +323,15 @@ export default function ExpenseDetailPage({ params }: Props) {
         subtotal: computedSubtotal,
         total: computedTotal,
         notes: (editDoc.notes as string) || undefined,
+        paidBy: (editDoc.paidBy as ExpensePaidBy) ?? document.paidBy ?? 'restaurant',
+        paidByName: (editDoc.paidByName as string) || undefined,
+        paybackStatus: (editDoc.paybackStatus as ExpensePaybackStatus) ?? document.paybackStatus ?? 'not_required',
+        paybackAmount: (editDoc.paybackAmount as number) || undefined,
+        paybackDate: editDoc.paybackDate instanceof Date ? editDoc.paybackDate : document.paybackDate,
+        paybackTo: (editDoc.paybackTo as string) || undefined,
+        paybackMethod: (editDoc.paybackMethod as ExpensePaybackMethod) || undefined,
+        paybackNote: (editDoc.paybackNote as string) || undefined,
+        paybackBy: (editDoc.paybackBy as string) || undefined,
         // If was confirmed, revert to draft so costs can be re-applied
         status: document.status === 'confirmed' ? 'draft' : document.status,
       });
@@ -552,6 +607,192 @@ export default function ExpenseDetailPage({ params }: Props) {
               ))}
             </div>
           )}
+
+          {/* Payment Tracking Section */}
+          <div className={`border-2 p-3 mb-4 ${PAID_BY_STYLE[isEditing ? (editDoc.paidBy as string) ?? 'restaurant' : document.paidBy ?? 'restaurant'] ?? 'border-gray-300 bg-gray-50'}`}>
+            <p className="text-[10px] font-bold mb-2 uppercase">💰 PAYMENT TRACKING</p>
+
+            {/* Paid By */}
+            <div className="mb-2">
+              <div className="text-[10px] font-bold text-gray-500 mb-0.5">WHO PAID</div>
+              {isEditing ? (
+                <>
+                  <select
+                    value={(editDoc.paidBy as string) ?? 'restaurant'}
+                    onChange={(e) => {
+                      const paidBy = e.target.value as ExpensePaidBy;
+                      const isRestaurant = paidBy === 'restaurant';
+                      setEditDoc((d) => ({
+                        ...d,
+                        paidBy,
+                        paybackStatus: isRestaurant ? 'not_required' : (d.paybackStatus === 'not_required' ? 'pending' : d.paybackStatus),
+                        paybackAmount: isRestaurant ? 0 : (d.paybackAmount || document.total),
+                        paidByName: isRestaurant ? '' : d.paidByName,
+                        paybackTo: isRestaurant ? '' : (d.paybackTo || (d.paidByName as string) || ''),
+                      }));
+                    }}
+                    className="w-full text-xs font-bold border-2 border-current px-2 py-1 bg-white outline-none"
+                  >
+                    {PAID_BY_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  {((editDoc.paidBy as string) === 'staff' || (editDoc.paidBy as string) === 'owner') && (
+                    <>
+                      <div className="text-[10px] font-bold text-gray-500 mt-1.5 mb-0.5">
+                        {(editDoc.paidBy as string) === 'owner' ? 'OWNER NAME' : 'STAFF NAME'}
+                      </div>
+                      <input
+                        value={(editDoc.paidByName as string) ?? ''}
+                        onChange={(e) => {
+                          const name = e.target.value;
+                          setEditDoc((d) => ({
+                            ...d,
+                            paidByName: name,
+                            // Auto-sync paybackTo if it was empty or matched the previous paidByName
+                            paybackTo: (!d.paybackTo || d.paybackTo === d.paidByName) ? name : d.paybackTo,
+                          }));
+                        }}
+                        placeholder={(editDoc.paidBy as string) === 'owner' ? 'e.g. คุณสมชาย, Partner A...' : 'e.g. พี่ต้น, น้องมิ้นท์...'}
+                        className="w-full text-xs border border-gray-300 px-2 py-1 outline-none bg-white"
+                      />
+                    </>
+                  )}
+                </>
+              ) : (
+                <div className="text-xs font-bold">
+                  {(document.paidBy ?? 'restaurant').toUpperCase()}
+                  {document.paidByName && <span className="text-gray-500 font-normal ml-1">({document.paidByName})</span>}
+                </div>
+              )}
+            </div>
+
+            {/* Payback Status - show only if not restaurant */}
+            {((isEditing ? editDoc.paidBy : document.paidBy) !== 'restaurant') && (
+              <div className="border-t border-current/20 pt-2 mt-2 space-y-2">
+                {/* Payback Status */}
+                <div>
+                  <div className="text-[10px] font-bold text-gray-500 mb-0.5">PAYBACK STATUS</div>
+                  {isEditing ? (
+                    <select
+                      value={(editDoc.paybackStatus as string) ?? 'pending'}
+                      onChange={(e) => setEditDoc((d) => ({ ...d, paybackStatus: e.target.value as ExpensePaybackStatus }))}
+                      className="w-full text-xs font-bold border border-gray-300 px-2 py-1 bg-white outline-none"
+                    >
+                      {PAYBACK_STATUS_OPTIONS.filter(o => o.value !== 'not_required').map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className={`text-xs font-bold ${PAYBACK_STATUS_STYLE[document.paybackStatus] ?? ''}`}>
+                      {(document.paybackStatus ?? 'pending').toUpperCase().replace('_', ' ')}
+                    </div>
+                  )}
+                </div>
+
+                {/* Payback Amount */}
+                <div>
+                  <div className="text-[10px] font-bold text-gray-500 mb-0.5">PAYBACK AMOUNT</div>
+                  {isEditing ? (
+                    <input
+                      type="number"
+                      value={(editDoc.paybackAmount as number) ?? document.total}
+                      onChange={(e) => setEditDoc((d) => ({ ...d, paybackAmount: parseFloat(e.target.value) || 0 }))}
+                      className="w-full text-xs font-bold border border-gray-300 px-2 py-1 bg-white outline-none text-right"
+                    />
+                  ) : (
+                    <div className="text-xs font-bold">
+                      ฿{(document.paybackAmount ?? document.total)?.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Payback To */}
+                <div>
+                  <div className="text-[10px] font-bold text-gray-500 mb-0.5">PAY BACK TO</div>
+                  {isEditing ? (
+                    <input
+                      value={(editDoc.paybackTo as string) ?? ''}
+                      onChange={(e) => setEditDoc((d) => ({ ...d, paybackTo: e.target.value }))}
+                      placeholder={(editDoc.paidBy as string) === 'owner' ? 'Owner name to pay back...' : 'Person name to pay back...'}
+                      className="w-full text-xs border border-gray-300 px-2 py-1 bg-white outline-none"
+                    />
+                  ) : (
+                    <div className="text-xs font-bold">{document.paybackTo || '—'}</div>
+                  )}
+                </div>
+
+                {/* Payback Method */}
+                <div>
+                  <div className="text-[10px] font-bold text-gray-500 mb-0.5">PAYBACK METHOD</div>
+                  {isEditing ? (
+                    <select
+                      value={(editDoc.paybackMethod as string) ?? ''}
+                      onChange={(e) => setEditDoc((d) => ({ ...d, paybackMethod: e.target.value as ExpensePaybackMethod }))}
+                      className="w-full text-xs border border-gray-300 px-2 py-1 bg-white outline-none"
+                    >
+                      <option value="">— Select —</option>
+                      {PAYBACK_METHOD_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-xs font-bold">
+                      {document.paybackMethod ? document.paybackMethod.toUpperCase() : '—'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Payback Date */}
+                <div>
+                  <div className="text-[10px] font-bold text-gray-500 mb-0.5">PAYBACK DATE</div>
+                  {isEditing ? (
+                    <input
+                      type="date"
+                      value={editDoc.paybackDate instanceof Date ? editDoc.paybackDate.toISOString().slice(0, 10) : ''}
+                      onChange={(e) => setEditDoc((d) => ({ ...d, paybackDate: e.target.value ? new Date(e.target.value) : undefined }))}
+                      className="w-full text-xs border border-gray-300 px-2 py-1 bg-white outline-none"
+                    />
+                  ) : (
+                    <div className="text-xs font-bold">
+                      {document.paybackDate ? format(document.paybackDate, 'dd/MM/yyyy') : '—'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Payback By (who processed it) */}
+                <div>
+                  <div className="text-[10px] font-bold text-gray-500 mb-0.5">PROCESSED BY</div>
+                  {isEditing ? (
+                    <input
+                      value={(editDoc.paybackBy as string) ?? ''}
+                      onChange={(e) => setEditDoc((d) => ({ ...d, paybackBy: e.target.value }))}
+                      placeholder="Who processed the payback..."
+                      className="w-full text-xs border border-gray-300 px-2 py-1 bg-white outline-none"
+                    />
+                  ) : (
+                    <div className="text-xs font-bold">{document.paybackBy || '—'}</div>
+                  )}
+                </div>
+
+                {/* Payback Note */}
+                <div>
+                  <div className="text-[10px] font-bold text-gray-500 mb-0.5">PAYBACK NOTE</div>
+                  {isEditing ? (
+                    <textarea
+                      value={(editDoc.paybackNote as string) ?? ''}
+                      onChange={(e) => setEditDoc((d) => ({ ...d, paybackNote: e.target.value }))}
+                      rows={2}
+                      placeholder="Optional note..."
+                      className="w-full text-xs border border-gray-300 p-1.5 bg-white outline-none resize-none"
+                    />
+                  ) : (
+                    <div className="text-xs">{document.paybackNote || '—'}</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Editable fields */}
           <div className="space-y-4">

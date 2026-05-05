@@ -97,6 +97,14 @@ export type ExpenseVendor = {
   updatedAt: Date;
 };
 
+// ─── Payment Tracking ─────────────────────────────────────────────────────────
+
+export type ExpensePaidBy = 'restaurant' | 'owner' | 'staff';
+
+export type ExpensePaybackStatus = 'not_required' | 'pending' | 'partial' | 'completed';
+
+export type ExpensePaybackMethod = 'cash' | 'transfer' | 'promptpay' | 'offset' | 'other';
+
 // ─── Expense Document (Receipt Level) ────────────────────────────────────────
 
 export type ExpenseDocumentStatus =
@@ -133,6 +141,17 @@ export type ExpenseDocument = {
   confirmedBy?: string;
   confirmedAt?: Date;
   createdBy?: string;
+  // ─── Payment Tracking ─────────────────
+  paidBy: ExpensePaidBy;
+  paidByName?: string; // specific person name (e.g. staff name)
+  paybackStatus: ExpensePaybackStatus;
+  paybackAmount?: number;
+  paybackDate?: Date;
+  paybackTo?: string; // who receives the payback (person name)
+  paybackMethod?: ExpensePaybackMethod;
+  paybackNote?: string;
+  paybackBy?: string; // who processed the payback
+  // ──────────────────────────────────────
   createdAt: Date;
   updatedAt: Date;
 };
@@ -354,6 +373,14 @@ export type ExpenseExportRow = {
   subtotal: number;
   discount: number;
   finalAmount: number;
+  paidBy: string;
+  paidByName: string;
+  paybackStatus: string;
+  paybackAmount: number;
+  paybackDate: string;
+  paybackTo: string;
+  paybackMethod: string;
+  paybackNote: string;
   aiExtracted: string;
   confidence: string;
   notes: string;

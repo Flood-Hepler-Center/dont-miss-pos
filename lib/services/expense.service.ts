@@ -51,7 +51,7 @@ function toDate(val: unknown): Date {
 
 function fromFirestoreDoc<T>(snap: { id: string; data: () => Record<string, unknown> }): T {
   const data = snap.data();
-  const dateFields = ['documentDate', 'createdAt', 'updatedAt', 'confirmedAt', 'lastPurchaseDate'];
+  const dateFields = ['documentDate', 'createdAt', 'updatedAt', 'confirmedAt', 'lastPurchaseDate', 'paybackDate'];
   const converted: Record<string, unknown> = { id: snap.id };
   for (const [k, v] of Object.entries(data)) {
     converted[k] = dateFields.includes(k) ? toDate(v) : v;
@@ -199,6 +199,7 @@ export const expenseDocumentService = {
     const data = removeUndefined({
       ...input,
       documentDate: input.documentDate instanceof Date ? Timestamp.fromDate(input.documentDate) : input.documentDate,
+      paybackDate: input.paybackDate instanceof Date ? Timestamp.fromDate(input.paybackDate) : input.paybackDate,
       status: 'draft',
       isAiExtracted: false,
       requiresReview: false,
@@ -215,6 +216,9 @@ export const expenseDocumentService = {
     const payload: Record<string, unknown> = removeUndefined({ ...rest, updatedAt: serverTimestamp() }) as Record<string, unknown>;
     if (rest.documentDate instanceof Date) {
       payload.documentDate = Timestamp.fromDate(rest.documentDate);
+    }
+    if (rest.paybackDate instanceof Date) {
+      payload.paybackDate = Timestamp.fromDate(rest.paybackDate);
     }
     await updateDoc(doc(db, COL.DOCUMENTS, id), payload);
   },
