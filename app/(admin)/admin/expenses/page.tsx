@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
-import { Upload, Plus, Download, Search, Filter, RefreshCw, Eye, Trash2, CheckCircle, AlertCircle, Clock, Bot } from 'lucide-react';
+import { Upload, Plus, Download, Search, Filter, RefreshCw, Eye, Trash2, CheckCircle, AlertCircle, Clock, Bot, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useExpenseDocuments, useExpenseStats } from '@/lib/hooks/useExpenses';
 import type { ExpenseFilter, ExpenseMainCategory, ExpenseDocumentStatus } from '@/types/expense';
 import { ExportModal } from './_components/export-modal';
@@ -42,28 +42,52 @@ const QUICK_RANGES = [
   { label: 'LAST 3M', start: startOfMonth(subMonths(new Date(), 2)), end: endOfMonth(new Date()) },
 ];
 
+const PAGE_SIZE_OPTIONS = [15, 25, 50, 100];
+
 export default function ExpensesPage() {
   const router = useRouter();
 
-  const [dateRange, setDateRange] = useState({ start: startOfMonth(new Date()), end: endOfMonth(new Date()) });
+  // Date range is nullable — null means "show all"
+  const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<ExpenseMainCategory | ''>('');
   const [statusFilter, setStatusFilter] = useState<ExpenseDocumentStatus | ''>('');
   const [searchText, setSearchText] = useState('');
 
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
   const filter: ExpenseFilter = useMemo(() => ({
-    startDate: dateRange.start,
-    endDate: dateRange.end,
+    startDate: dateRange?.start,
+    endDate: dateRange?.end,
     mainCategory: categoryFilter || undefined,
     status: statusFilter || undefined,
     searchText: searchText || undefined,
   }), [dateRange, categoryFilter, statusFilter, searchText]);
 
   const { documents, loading, confirmDocument, deleteDocument } = useExpenseDocuments(filter);
-  const statsFilter = useMemo(() => ({ startDate: dateRange.start, endDate: dateRange.end }), [dateRange.start, dateRange.end]);
+  const statsFilter = useMemo(() => ({
+    startDate: dateRange?.start,
+    endDate: dateRange?.end,
+  }), [dateRange]);
   const { stats } = useExpenseStats(statsFilter);
 
   // Exclude cancelled documents from standard display lists
   const displayDocs = useMemo(() => documents.filter((d) => d.status !== 'cancelled'), [documents]);
+
+  // Pagination computed
+  const totalPages = Math.max(1, Math.ceil(displayDocs.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedDocs = useMemo(
+    () => displayDocs.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [displayDocs, safePage, pageSize]
+  );
+
+  // Reset page on filter change
+  const setDateRangeAndReset = useCallback((v: { start: Date; end: Date } | null) => {
+    setDateRange(v);
+    setCurrentPage(1);
+  }, []);
 
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
@@ -166,12 +190,21 @@ export default function ExpensesPage() {
         <div className="flex flex-wrap gap-3 items-center">
           {/* Quick ranges */}
           <div className="flex gap-1">
+            <button
+              onClick={() => setDateRangeAndReset(null)}
+              className={`px-3 py-1 text-[10px] font-bold border-2 border-black transition-colors ${
+                dateRange === null ? 'bg-black text-white' : 'hover:bg-gray-50'
+              }`}
+            >
+              ALL
+            </button>
             {QUICK_RANGES.map((r) => (
               <button
                 key={r.label}
-                onClick={() => setDateRange({ start: r.start, end: r.end })}
+                onClick={() => setDateRangeAndReset({ start: r.start, end: r.end })}
                 className={`px-3 py-1 text-[10px] font-bold border-2 border-black transition-colors ${
-                  dateRange.start.getTime() === r.start.getTime() ? 'bg-black text-white' : 'hover:bg-gray-50'
+                  dateRange && dateRange.start.getTime() === r.start.getTime() && dateRange.end.getTime() === r.end.getTime()
+                    ? 'bg-black text-white' : 'hover:bg-gray-50'
                 }`}
               >
                 {r.label}
@@ -182,22 +215,30 @@ export default function ExpensesPage() {
           <div className="flex gap-2 items-center">
             <input
               type="date"
-              value={format(dateRange.start, 'yyyy-MM-dd')}
-              onChange={(e) => setDateRange((p) => ({ ...p, start: new Date(e.target.value) }))}
+              value={dateRange ? format(dateRange.start, 'yyyy-MM-dd') : ''}
+              onChange={(e) => {
+                if (!e.target.value) return;
+                const start = new Date(e.target.value);
+                setDateRangeAndReset({ start, end: dateRange?.end ?? endOfMonth(start) });
+              }}
               className="border-2 border-black px-2 py-1 text-xs font-mono"
             />
             <span className="text-xs font-bold">→</span>
             <input
               type="date"
-              value={format(dateRange.end, 'yyyy-MM-dd')}
-              onChange={(e) => setDateRange((p) => ({ ...p, end: new Date(e.target.value) }))}
+              value={dateRange ? format(dateRange.end, 'yyyy-MM-dd') : ''}
+              onChange={(e) => {
+                if (!e.target.value) return;
+                const end = new Date(e.target.value);
+                setDateRangeAndReset({ start: dateRange?.start ?? startOfMonth(end), end });
+              }}
               className="border-2 border-black px-2 py-1 text-xs font-mono"
             />
           </div>
 
           <select
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value as ExpenseMainCategory | '')}
+            onChange={(e) => { setCategoryFilter(e.target.value as ExpenseMainCategory | ''); setCurrentPage(1); }}
             className="border-2 border-black px-2 py-1 text-xs font-bold font-mono"
           >
             <option value="">ALL CATEGORIES</option>
@@ -208,7 +249,7 @@ export default function ExpensesPage() {
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as ExpenseDocumentStatus | '')}
+            onChange={(e) => { setStatusFilter(e.target.value as ExpenseDocumentStatus | ''); setCurrentPage(1); }}
             className="border-2 border-black px-2 py-1 text-xs font-bold font-mono"
           >
             <option value="">ALL STATUS</option>
@@ -223,7 +264,7 @@ export default function ExpensesPage() {
             <input
               placeholder="Search vendor, receipt..."
               value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
+              onChange={(e) => { setSearchText(e.target.value); setCurrentPage(1); }}
               className="w-full border-2 border-black pl-6 pr-2 py-1 text-xs font-mono"
             />
           </div>
@@ -270,7 +311,7 @@ export default function ExpensesPage() {
               </tr>
             </thead>
             <tbody>
-              {displayDocs.map((doc, i) => {
+              {paginatedDocs.map((doc, i) => {
                 const statusCfg = STATUS_CONFIG[doc.status] ?? STATUS_CONFIG.draft;
                 return (
                   <tr key={doc.id} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
@@ -368,11 +409,66 @@ export default function ExpensesPage() {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="border-t-2 border-black p-4 flex items-center justify-between">
-        <span className="text-xs text-gray-500">
-          {displayDocs.length} DOCUMENT{displayDocs.length !== 1 ? 'S' : ''} · {format(dateRange.start, 'dd MMM')} – {format(dateRange.end, 'dd MMM yyyy')}
-        </span>
+      {/* Pagination Footer */}
+      <div className="border-t-2 border-black p-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-500">
+            {displayDocs.length} DOCUMENT{displayDocs.length !== 1 ? 'S' : ''}
+            {dateRange ? ` · ${format(dateRange.start, 'dd MMM')} – ${format(dateRange.end, 'dd MMM yyyy')}` : ' · ALL TIME'}
+          </span>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-400 font-bold">SHOW</span>
+            <select
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+              className="border border-gray-300 px-1 py-0.5 text-[10px] font-bold font-mono"
+            >
+              {PAGE_SIZE_OPTIONS.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            <span className="text-[10px] text-gray-400 font-bold">PER PAGE</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={safePage <= 1}
+            className="p-1.5 border border-black text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+          >
+            <ChevronLeft size={14} />
+          </button>
+
+          <div className="flex items-center gap-1">
+            {totalPages <= 7 ? (
+              Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setCurrentPage(p)}
+                  className={`w-7 h-7 text-[10px] font-bold border transition-colors ${
+                    p === safePage ? 'bg-black text-white border-black' : 'border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))
+            ) : (
+              <span className="text-xs font-bold font-mono px-2">
+                {safePage} / {totalPages}
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={safePage >= totalPages}
+            className="p-1.5 border border-black text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+          >
+            <ChevronRight size={14} />
+          </button>
+        </div>
+
         <button
           onClick={() => setIsExportModalOpen(true)}
           className="flex items-center gap-1 text-xs font-bold underline hover:no-underline"
@@ -384,8 +480,8 @@ export default function ExpensesPage() {
       <ExportModal
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
-        defaultStartDate={dateRange.start}
-        defaultEndDate={dateRange.end}
+        defaultStartDate={dateRange?.start ?? startOfMonth(subMonths(new Date(), 2))}
+        defaultEndDate={dateRange?.end ?? endOfMonth(new Date())}
         onExport={executeExport}
       />
     </div>
